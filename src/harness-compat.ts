@@ -21,7 +21,7 @@
  *      `undefined` 或服务面，把"为什么没用上"交给拿到 `undefined` 的调用方
  *      记一条告警，让"某个功能为什么没生效"有一个能查的答案。
  *
- * @module @huanlin/dsh-plugin-crossfire/harness-compat
+ * @module @y9931666/dsh-plugin-crossfire/harness-compat
  */
 
 import type { Context } from '@deepseek-ai/cordis'

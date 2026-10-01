@@ -21,7 +21,7 @@
  *
  * ## 与圆桌会议那份的关系
  *
- * 本文件是 `@huanlin/dsh-plugin-roundtable` 的 `ui-slots-anchor.d.ts` 的结构性
+ * 本文件是 `@y9931666/dsh-plugin-roundtable` 的 `ui-slots-anchor.d.ts` 的结构性
  * 副本，类型名改成 `Crossfire*` 前缀以免两个插件在同一 TS 程序里发生接口合并
  * 冲突。**mirror 关系必须与宿主真实 face 逐成员一致**：曾经（圆桌 v0.2.2）手写
  * 一个 2 成员的精简 face，结果它赢下了接口合并、把宿主真正的 `SlotRegistry`

@@ -15,7 +15,7 @@
  * 摘要只覆盖 `JSON.stringify(payload)` 的字节。同一份内容若换了键序就会算出不同的
  * ETag —— 那只会**少省一次**传输，不会给出错误数据（宁可多发，不可发错）。
  *
- * @module @huanlin/dsh-plugin-crossfire/etag
+ * @module @y9931666/dsh-plugin-crossfire/etag
  */
 
 import { createHash } from 'node:crypto'

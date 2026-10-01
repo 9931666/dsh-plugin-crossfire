@@ -1,5 +1,5 @@
 {
-  "name": "@huanlin/dsh-plugin-crossfire",
+  "name": "@y9931666/dsh-plugin-crossfire",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public",
@@ -7,7 +7,7 @@
   },
   "description": "Crossfire (针锋) for DeepSeek Harness: put a settled result on the stand, let red-team experts attack it from chosen dimensions, and adjudicate every single defect yourself. Adversarial review as a first-class primitive — no topology, no aggregation gateway, no automatic fixes. The machine only finds flaws; the human always owns the verdict.",
   "author": {
-    "name": "huanlin",
+    "name": "y9931666",
     "url": "https://github.com/9931666"
   },
   "homepage": "https://github.com/9931666/dsh-plugin-crossfire#readme",

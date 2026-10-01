@@ -13,7 +13,7 @@
 export const PLUGIN_VERSION = '0.1.0'
 
 /** 导出物头部使用的插件标识行。 */
-export const PLUGIN_ID = `@huanlin/dsh-plugin-crossfire v${PLUGIN_VERSION}`
+export const PLUGIN_ID = `@y9931666/dsh-plugin-crossfire v${PLUGIN_VERSION}`
 
 /** DeepSeek Harness 版本区间（导出头部展示用）。
  *  必须与 `compatibility.json` 的 `recommendedHost` 一致 —— 由

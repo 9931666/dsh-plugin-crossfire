@@ -11,7 +11,7 @@
  * 简单 POST 免预检）都能命中插件路由 —— 删会议、改连线、读走全部评审内容与
  * 发言。宿主自己的 `/api` 有栅栏，插件这两条路由曾是缺口。
  *
- * @module @huanlin/dsh-plugin-crossfire/web-guard
+ * @module @y9931666/dsh-plugin-crossfire/web-guard
  */
 
 import type { IncomingMessage } from 'node:http'

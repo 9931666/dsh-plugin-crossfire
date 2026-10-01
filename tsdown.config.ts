@@ -17,7 +17,7 @@ import { defineConfig, type UserConfig } from 'tsdown'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, resolve as resolvePath } from 'node:path'
 
-const ID = '@huanlin/dsh-plugin-crossfire'
+const ID = '@y9931666/dsh-plugin-crossfire'
 
 /** DSH platform modules that stay external in the browser bundle.
  *

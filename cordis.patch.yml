@@ -9,7 +9,7 @@
 # Install: `dsh plugin --profile <name> add <this package>`.
 - insert:
     - id: crossfire
-      name: '@huanlin/dsh-plugin-crossfire'
+      name: '@y9931666/dsh-plugin-crossfire'
       config:
         # Review state lives under `<session workspace>/.crossfire/<reviewId>/`
         stateDir: .crossfire

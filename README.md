@@ -23,8 +23,11 @@ Crossfire 是 DeepSeek Harness 的一个插件，只做一件事：**对抗式�
 ## 安装
 
 ```sh
-dsh plugin --profile web add @huanlin/dsh-plugin-crossfire
+dsh plugin --profile web add @y9931666/dsh-plugin-crossfire
 ```
+
+> 包名是 `@y9931666/...`（作者的 npm 账户名）；`@huanlin` 是**另一个用户**的 scope，
+> 历史文档里那个包名已被占用、不可用。
 
 安装后**重启 Harness 进程**并刷新浏览器（host 侧改动不热重载）。
 

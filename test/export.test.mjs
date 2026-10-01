@@ -47,7 +47,7 @@ test('导出包含全部关键小节', () => {
 test('预填头带插件标识、轮次、强度与表态统计', () => {
   const record = sampleRecord()
   const markdown = renderReviewMarkdown(record, countDefects(record))
-  assert.ok(markdown.includes('@huanlin/dsh-plugin-crossfire v'))
+  assert.ok(markdown.includes('@y9931666/dsh-plugin-crossfire v'))
   assert.ok(markdown.includes('x-sample'))
   assert.ok(markdown.includes('认定 1'))
   assert.ok(markdown.includes('驳回 1'))
