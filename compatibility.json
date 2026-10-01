@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "recommendedHost": "0.2.0-rc.2",
+  "previewTag": "next",
+  "supportedHosts": [
+    {
+      "version": "0.2.0-rc.2",
+      "track": "recommended"
+    }
+  ],
+  "capabilities": {
+    "required": [
+      "tools",
+      "subagents",
+      "agents",
+      "systemPrompt"
+    ],
+    "optional": [
+      "connection",
+      "llm",
+      "webServer",
+      "workspaceRegistry"
+    ]
+  },
+  "baseline": {
+    "note": "开发类型基线必须与 recommendedHost 精确一致：插件发布后，消费者任何机器上 npm install 拿到的类型就是这个版本。四处（本文件、package.json 的 devDependencies 与 peerDependencies、src/index.ts 的 inject）必须保持一致。crossfire 需要的能力比圆桌会议更少：不要 skills、不要 sessionProjections、不要 userQuestions —— 红队评审不需要知识库中继、不需要 skill 中继、表态只发生在人手里（不经过 ask_user_question）。",
+    "packages": [
+      "@deepseek-ai/dsh-agent",
+      "@deepseek-ai/dsh-atomic-write",
+      "@deepseek-ai/dsh-client-connection",
+      "@deepseek-ai/dsh-client-locale",
+      "@deepseek-ai/dsh-client-ui-renderer",
+      "@deepseek-ai/dsh-client-ui-settings",
+      "@deepseek-ai/dsh-client-ui-tool",
+      "@deepseek-ai/dsh-host-webserver",
+      "@deepseek-ai/dsh-llm",
+      "@deepseek-ai/dsh-session",
+      "@deepseek-ai/dsh-subagent",
+      "@deepseek-ai/dsh-system-prompt",
+      "@deepseek-ai/dsh-tools",
+      "@deepseek-ai/dsh-workspace"
+    ]
+  }
+}

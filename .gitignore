@@ -1,0 +1,29 @@
+# 依赖：本包的 node_modules 是指向圆桌依赖的 junction（提权创建），绝不入库。
+node_modules/
+
+# 构建产物：由 `tsdown -c tsdown.config.ts` 生成，可随时重建。
+lib/
+
+# 类型生成产物（`tsc --emitDeclarationOnly`）。
+lib/types/
+
+# 评审状态根（真实用户数据，位于工作区根，此处仅防御性忽略）。
+.crossfire/
+.roundtable/
+
+# 临时脚本与本轮修复期的备份。
+.tmp-*
+*.bak
+*.orig
+*.rej
+
+# 本地交接文档：含本机绝对路径、会话 id、真实评审数据与本轮开发决策记录。
+# 它服务于"下一个人接着开发"，不属于公开面（公开面看 README + release-notes）。
+HANDOVER.md
+
+# 编辑器 / 系统噪音。
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.log

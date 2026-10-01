@@ -1,0 +1,25 @@
+# dsh-plugin-crossfire bundle patch: mounts the Crossfire (针锋) plugin into the
+# host composition of a dsh profile.
+#
+# Crossfire is deliberately the opposite of a team plugin: it produces no plan,
+# writes no code and never fixes anything by itself. It puts one settled result
+# on the stand, lets red-team experts attack it from the chosen dimensions, and
+# hands every single defect to the human for a verdict.
+#
+# Install: `dsh plugin --profile <name> add <this package>`.
+- insert:
+    - id: crossfire
+      name: '@huanlin/dsh-plugin-crossfire'
+      config:
+        # Review state lives under `<session workspace>/.crossfire/<reviewId>/`
+        stateDir: .crossfire
+        # Provider used to spawn red-team expert subagents ('spawn' or 'fork').
+        memberProvider: spawn
+        # Hard cap on experts spawned for one review (dimension pool is 7).
+        maxExperts: 7
+        # Default attack intensity: quick | standard | deep.
+        defaultIntensity: standard
+        # Expert-subagent delegation depth cap (experts must not recruit).
+        memberMaxDepth: 1
+        # Prompt-section order for the usage policy (kept clear of other plugins).
+        promptSectionOrder: 117

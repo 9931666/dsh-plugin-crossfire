@@ -1,0 +1,738 @@
+/*
+ * Crossfire Chat card styles.
+ *
+ * 硬约束：**每个颜色都来自主题令牌**（`Theme.listTokens` 的 `--dsw-alias-*` 一族），
+ * 所以浅色与深色主题都无需自己写 override。圆桌的设置页 CSS 用了硬编码
+ * `#ffffff` / `rgba(0,0,0,.8)`，在深色主题下是坏的 —— 这里不重复那个错误。
+ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card + .card {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+}
+
+/* 折叠的评审：一行摘要，点一下切换到它。卡片会列出本会话的全部评审，全展开
+   就是一堵墙（验收期间真实攒到 5 场、12 条缺陷）。 */
+.collapsed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collapsed:hover {
+  border-color: var(--dsw-alias-brand-primary, #4a6cf7);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.subjectTitle {
+  font-weight: 600;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.badge_draft {
+  border-color: var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.5));
+}
+
+.badge_attacking {
+  border-color: var(--dsw-alias-state-warn-primary, rgba(200, 150, 0, 0.6));
+  color: var(--dsw-alias-state-warn-primary, inherit);
+}
+
+.badge_judging {
+  border-color: var(--dsw-alias-brand-primary, #4a6cf7);
+  color: var(--dsw-alias-brand-primary, inherit);
+}
+
+.badge_settled {
+  border-color: var(--dsw-alias-state-success-primary, #2e7d32);
+  color: var(--dsw-alias-state-success-primary, inherit);
+}
+
+/* ---- 状态区：当前处于哪一态 + 下一步该做什么（唯一主行动） ----------------
+ *
+ * 这是卡片上**唯一**的强对比区域，其余段落一律保持低对比（标题灰、正文常规）。
+ * 主行动是这一区里唯一的主色实心按钮，所以"现在该干什么"不需要读完全卡去找。
+ */
+.statusStrip {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+
+/* 左侧信息块：态名 + 轮次 + 一句话说明；吃掉剩余宽度，主行动因此被推到右侧。 */
+.statusStripInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.statusStripHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 态名用反色实心药丸：它与主行动按钮同色，一眼就能配对（"现在在这里 → 下一步在那里"）。 */
+.statusState {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--dsw-alias-brand-primary, #4a6cf7);
+  color: var(--dsw-alias-bg-base, #ffffff);
+}
+
+.statusHint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+/* 右侧行动块：一个主按钮 + 一行"下一步"小标题。 */
+.statusStripAction {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.statusNextLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+/* 主行动：唯一的主色实心按钮。字号与内边距都比次要按钮大一档，视觉权重随之提高。 */
+.cta {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid var(--dsw-alias-brand-primary, #4a6cf7);
+  background: var(--dsw-alias-brand-primary, #4a6cf7);
+  color: var(--dsw-alias-bg-base, #ffffff);
+}
+
+.cta:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.statusError {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+  word-break: break-word;
+}
+
+.statusOk {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-state-success-primary, #2e7d32);
+  word-break: break-word;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ---- 品牌块（provider 缩写 + 品牌色） ----
+ *
+ * 底色是**第三方商标色**（深色主题下也一样），文字固定白色 —— 这是本插件里唯一
+ * 不使用主题令牌的颜色。面积被刻意压到 18px 见方：它是身份标记，不是信息主体，
+ * 主题（浅色/深色）不影响其可读性。
+ */
+.brandBlock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  line-height: 1;
+  user-select: none;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.subject,
+.stance {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+
+.stance {
+  border-left: 2px solid var(--dsw-alias-brand-primary, #4a6cf7);
+}
+
+/* 立场编辑框：左侧那根品牌色竖线是刻意的 —— 它是"锋"的视觉标记，提醒用户
+   这段文字会被红队逐条对攻。 */
+.stanceInput {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  border-left: 2px solid var(--dsw-alias-brand-primary, #4a6cf7);
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  resize: vertical;
+}
+
+.stanceInput:disabled {
+  opacity: 0.7;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.chip {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.chipWarn {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-warn-primary, rgba(200, 150, 0, 0.6));
+  color: var(--dsw-alias-state-warn-primary, inherit);
+}
+
+.chipStrike {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-error-primary, rgba(217, 83, 79, 0.6));
+  color: var(--dsw-alias-state-error-primary, inherit);
+}
+
+.expertRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+
+.expertName {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.impactBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  font-size: 12px;
+}
+
+.countEndorsed {
+  color: var(--dsw-alias-state-success-primary, #2e7d32);
+  font-weight: 600;
+}
+
+.countRejected {
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+  font-weight: 600;
+}
+
+.countPending {
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.countStrike {
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+}
+
+.defect {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+
+.defectHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+
+.quote {
+  font-size: 12px;
+  padding-left: 8px;
+  border-left: 2px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.defectContent {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.evidence {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, inherit);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.evidenceLabel {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+/* 复审核对区：用虚线框与"待裁决"的实线框区分开 —— 它问的是另一个问题
+   （修没修），而不是"这条缺陷成不成立"。 */
+.recheckBox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.45));
+}
+
+.recheckHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+
+.rejectReason {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btnPrimary,
+.btnPrimaryOn,
+.btnDanger,
+.btnDangerOn,
+.btnGhost {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+.btnPrimaryOn {
+  border-color: var(--dsw-alias-state-success-primary, #2e7d32);
+  color: var(--dsw-alias-state-success-primary, inherit);
+  font-weight: 600;
+}
+
+.btnDangerOn {
+  border-color: var(--dsw-alias-state-error-primary, #d9534f);
+  color: var(--dsw-alias-state-error-primary, inherit);
+  font-weight: 600;
+}
+
+.btnGhost {
+  border-color: transparent;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.btnPrimary:disabled,
+.btnPrimaryOn:disabled,
+.btnDanger:disabled,
+.btnDangerOn:disabled,
+.btnGhost:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.rejectBox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-state-error-primary, rgba(217, 83, 79, 0.4));
+}
+
+.rejectPrompt {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rejectInput {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-base, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  resize: vertical;
+}
+
+.link {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-brand-primary, #4a6cf7);
+  cursor: pointer;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.25));
+}
+
+.footerNote {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.warn {
+  font-size: 11px;
+  color: var(--dsw-alias-state-warn-primary, inherit);
+}
+
+.notice {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-state-error-primary, rgba(217, 83, 79, 0.5));
+  color: var(--dsw-alias-state-error-primary, inherit);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ==========================================================================
+ * 用户反馈驱动的视觉改造（分区 / 三色表态 / 专家身份 / 可关闭说明 / 折叠按钮）
+ *
+ * 核心目标：**次要信息让位，主要信息抓得住**。手段只有三种 —— 分隔线、颜色语义、
+ * 按钮形状。刻意不引入背景色块堆叠：那只会让"一堵墙"变成"一堵彩色的墙"。
+ * 颜色仍然全部来自主题令牌（品牌色块是唯一例外，见 brand.ts）。
+ * ========================================================================== */
+
+/* ---- 分区：带竖线的小标题 + 硬分隔线 ---- */
+
+.sectionDivider {
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.28));
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+.sectionHeadRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 分区标题：左侧品牌色竖线 + 加粗，成为扫读时的视觉锚点。 */
+.sectionTitleStrong {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding-left: 8px;
+  border-left: 3px solid var(--dsw-alias-brand-primary, #4a6cf7);
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+.sectionCount {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+/* ---- 展开 / 折叠：做成按钮，不要看起来像正文链接 ---- */
+
+.foldButton {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.45));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.foldButton:hover {
+  border-color: var(--dsw-alias-brand-primary, #4a6cf7);
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+/* ---- 可关闭的解释性说明 ---- */
+
+.explain {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.explainText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.explainClose {
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.explainClose:hover {
+  border-color: var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.45));
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+/* ---- 专家：头像 + 名称 + 维度 + 状态 ---- */
+
+.expertCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+
+.expertHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 专家名用正文色与加粗：它是"这条观点是谁提的"的答案，必须比元数据更显眼。 */
+.expertNameStrong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+/* 缺陷子卡抬头里的作者标识（头像 + 名称）。 */
+.defectAuthor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+/* ---- 三态表态：绿 / 红 / 灰 -----------------------------------------------
+ *
+ * 用户要求：三个都做成按钮形状并各对应颜色；点中之后整块填充该颜色、文字变白。
+ * 未点中 = 该颜色的描边 + 同色文字（颜色语义仍在，但不抢主行动的视觉权重）。
+ */
+.verdictButton {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.verdictEndorse {
+  border: 1px solid var(--dsw-alias-state-success-primary, #2e7d32);
+  color: var(--dsw-alias-state-success-primary, #2e7d32);
+}
+
+.verdictEndorseOn {
+  border: 1px solid var(--dsw-alias-state-success-primary, #2e7d32);
+  background: var(--dsw-alias-state-success-primary, #2e7d32);
+  color: var(--dsw-alias-bg-base, #ffffff);
+}
+
+.verdictReject {
+  border: 1px solid var(--dsw-alias-state-error-primary, #d9534f);
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+}
+
+.verdictRejectOn {
+  border: 1px solid var(--dsw-alias-state-error-primary, #d9534f);
+  background: var(--dsw-alias-state-error-primary, #d9534f);
+  color: var(--dsw-alias-bg-base, #ffffff);
+}
+
+.verdictPending {
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.5));
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.verdictPendingOn {
+  border: 1px solid var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.85));
+  background: var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.85));
+  color: var(--dsw-alias-bg-base, #ffffff);
+}
+
+.verdictButton:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* ---- 立场全貌（可滚动） ---- */
+
+.stanceFull {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border-left: 2px solid var(--dsw-alias-brand-primary, #4a6cf7);
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+
+/* ---- 角色定位编辑器 ---- */
+
+.roleEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.roleInput {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-base, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  resize: vertical;
+}
+

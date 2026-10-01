@@ -1,0 +1,452 @@
+/*
+ * Crossfire settings page styles.
+ *
+ * 硬约束：**每一个颜色都必须来自主题令牌**（运行时 `Theme.listTokens` 的
+ * `--dsw-alias-*` 一族），因此浅色与深色主题都无需自己写 override。
+ *
+ * 这里刻意不照抄圆桌会议的 `RoundTableSettings.module.css`：那份用的是硬编码
+ * `#ffffff` / `rgba(0, 0, 0, 0.8)`，在深色主题下会呈现出白底黑字的割裂块。
+ * 令牌已经由宿主按主题解析过，直接用才是正确的做法。
+ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 620px;
+  padding: 8px 0;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+.notice {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.noticeOk {
+  color: var(--dsw-alias-state-success-primary, #2e7d32);
+}
+
+.noticeErr {
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 区块抬头行：标题在左，"新建"这类**区块主操作**在右。
+ *
+ * 之前"＋ 新建预设"与"编辑/删除"这类次要操作同级、且淹没在列表下方，用户实测
+ * 反馈"不够显眼"。提为区块主操作后，它在本区里是唯一的实心按钮。 */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sectionHead .sectionTitle {
+  flex: 0 1 auto;
+}
+
+/* 把主操作推到右侧；窄屏换行时它自然塌成整行。 */
+.sectionHeadGap {
+  flex: 1 1 auto;
+}
+
+/* ---- 区块主操作（品牌色实心） ---- */
+
+.primaryButton {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-brand-primary, #4a6cf7);
+  background: var(--dsw-alias-brand-primary, #4a6cf7);
+  color: var(--dsw-alias-bg-base, #ffffff);
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  cursor: not-allowed;
+  border-color: var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.7));
+}
+
+/* ---- 品牌块（provider 缩写 + 品牌色） ----
+ *
+ * 与 ReviewCard.module.css 的同名规则刻意各写一份：CSS Modules 的 classMap 是
+ * 按模块生成的，跨模块复用类名只能靠把 classMap 传来传去，不值得。两处的大小
+ * 差异也是真实的（这里是列表行，那里是密集的专家行）。
+ */
+.brandBlock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  line-height: 1;
+  user-select: none;
+}
+
+/* 行内的品牌块 + 路由文本：块给身份，文本给可读的全名（块的 title 在触屏上读不到）。 */
+.routeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-secondary, rgba(128, 128, 128, 0.9));
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.input,
+.select {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  max-width: 260px;
+}
+
+.input:focus,
+.select:focus {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a6cf7);
+  outline-offset: 1px;
+}
+
+/* ---- 强度：三选一的分段控件 ---- */
+
+.segmented {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  border-radius: 8px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.segment {
+  font-size: 13px;
+  padding: 6px 14px;
+  border: none;
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  cursor: pointer;
+}
+
+.segment + .segment {
+  border-left: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+}
+
+.segmentActive {
+  background: var(--dsw-alias-brand-primary, #4a6cf7);
+  color: var(--dsw-alias-bg-base, #ffffff);
+  font-weight: 600;
+}
+
+.segment:disabled {
+  cursor: progress;
+  color: var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.7));
+}
+
+/* ---- 维度池 ---- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+/* 带品牌块的成员 chip：左边品牌色块，右边成员 key。 */
+.chipWithBrand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+/* 成员 chip 里的品牌块比列表行的再小一点：chip 本身只有 24px 高。 */
+.brandBlockSmall {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  line-height: 1;
+  user-select: none;
+}
+
+.chipCustom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+.chipRemove {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.addRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.addButton {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  cursor: pointer;
+}
+
+.addButton:disabled {
+  cursor: not-allowed;
+  color: var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.7));
+}
+
+/* ---- 边界说明 ---- */
+
+.boundary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+.boundaryTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+
+.batchNote {
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-state-warn-primary, rgba(200, 150, 0, 0.5));
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+
+/* ------------------------------------------------------------------ *
+ * 角色预设 / 阵容预设（后补的类，颜色同样只用主题令牌）
+ * ------------------------------------------------------------------ */
+
+/* 比 .input / .select 的 260px 宽一些：角色说明与模型名更长。 */
+.inputWide {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  width: 100%;
+  max-width: 420px;
+}
+
+.textarea {
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  width: 100%;
+  max-width: 420px;
+  resize: vertical;
+}
+
+.inputWide:focus,
+.textarea:focus {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a6cf7);
+  outline-offset: 1px;
+}
+
+/* ---- 列表 ---- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.listRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rowName {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rowMeta {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, inherit);
+  word-break: break-word;
+}
+
+/* 把行内按钮推到右侧；列表换行时它自然塌成 0 宽。 */
+.spacer {
+  flex: 1 1 auto;
+}
+
+.rowButton {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, inherit);
+  cursor: pointer;
+}
+
+.rowDanger {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-state-error-primary, #d9534f);
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary, #d9534f);
+  cursor: pointer;
+}
+
+.rowButton:disabled,
+.rowDanger:disabled {
+  cursor: not-allowed;
+  color: var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.7));
+  border-color: var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+}
+
+/* ---- 内联编辑器 ---- */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  background: var(--dsw-alias-bg-overlay, var(--dsw-alias-bg-layer-1, transparent));
+}
+
+.gridTwo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+/* ---- 阵容成员行 ---- */
+
+.member {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-bg-layer-2, transparent);
+}
+
+.memberFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  flex: 1 1 320px;
+}
+
+/* 上限提示：与 .notice 同字号，但用 warn 令牌（浅深色都可读）。 */
+.warn {
+  color: var(--dsw-alias-state-warn-primary, rgba(200, 150, 0, 0.9));
+}
+
