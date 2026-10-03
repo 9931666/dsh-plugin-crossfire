@@ -367,6 +367,32 @@
   word-break: break-word;
 }
 
+/* ---- 观点标题 + 折叠 ----
+ *
+ * 用户诉求：①"每条观点都要在开头立一个标题，这样目的明确"；②"每条观点都可以折叠，
+ * 折叠后只显示标题和对应专家"。
+ *
+ * 标题做成**按钮**而不是纯文字：整行可点即展开/收起，省掉一个额外的折叠控件；视觉上
+ * 它是这一条的抬头（比正文重一档），折叠态下也就是唯一可见的内容。
+ */
+.defectTitle {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: left;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary, inherit);
+  cursor: pointer;
+}
+
+.defectTitle:hover {
+  color: var(--dsw-alias-brand-primary, #4a6cf7);
+}
+
 .evidence {
   font-size: 12px;
   color: var(--dsw-alias-label-secondary, inherit);

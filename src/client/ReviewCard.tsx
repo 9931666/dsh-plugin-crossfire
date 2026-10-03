@@ -106,6 +106,11 @@ export function CrossfireCard(props: Partial<CrossfireCardInjected>): ReactEleme
   // 被用户关掉的解释性说明（键 → true）。它持久化在偏好里：用户说过"删了之后就不
   // 会再显示"，所以刷新页面也不能回来（恢复入口留在设置页）。
   const [dismissedHints, setDismissedHints] = useState<Record<string, boolean>>({})
+  // 已展开的观点（键 = `${reviewId}::${defectId}`）。
+  //
+  // 用"展开集合"而不是"折叠集合"，是为了让**默认全部折叠**成为天然行为：集合为空即
+  // 全部折叠（用户选择），新收集到的观点也自动折叠，不会因为状态里没有它而突然全展开。
+  const [expandedDefects, setExpandedDefects] = useState<Record<string, boolean>>({})
   const [dismissBusy, setDismissBusy] = useState(false)
   const alive = useRef(true)
 
@@ -490,6 +495,53 @@ function authorOf(expertKey: string, experts: readonly WireExpert[]): WireExpert
 function routeOf(expert: WireExpert | undefined, fallback: string): string {
   if (expert === undefined || expert.provider === undefined) return fallback
   return routeText(expert.provider, expert.model)
+}
+
+/**
+ * 观点标题：一条缺陷卡片的"抬头"。
+ *
+ * 红队的报告信封要求每条发言以 `观点 N（指向 X，维度Y）：正文` 开头，而这个前缀
+ * 恰恰就是最有信息量的一行（编号 + 定位 + 维度）。用户反馈："观点虽然说我可以理解，
+ * 把完整内容给写出来了，但我觉得还是要在最开始那里立一个标题，这样目的明确"。
+ *
+ * 兜底顺序：① 用信封前缀（`观点 N（指向 X，维度Y）`）→ ② 未按格式提交时取首句
+ * （按中英文句号/分号/换行切，限长）。**绝不**返回空串 —— 标题位空了比不显示更糟。
+ */
+function defectTitle(content: string): string {
+  const text = content.trim()
+  const envelope = /^(观点\s*\d+\s*[（(][^）)]*[）)])\s*[:：]?/.exec(text)
+  if (envelope !== null && envelope[1] !== undefined) return envelope[1].trim()
+  // 逐句切：先按换行，再按句末标点，取第一个非空片段。
+  const firstSegment = text.split(/\n+/)[0] ?? text
+  const firstSentence = firstSegment.split(/(?<=[。．.；;！!？?])/)[0] ?? firstSegment
+  const title = firstSentence.trim()
+  if (title === '') return text.slice(0, 80)
+  return title.length > 80 ? `${title.slice(0, 80)}…` : title
+}
+
+/**
+ * 缺陷排序：**打穿立场的优先**，其次按维度分组，组内保持原始顺序。
+ *
+ * 这是 §5.3 方向 4 的落地："按维度分组、按是否打穿立场排序，把最需要裁决的排在最前"。
+ * 用 `map + index` 稳定排序，保证同一组内的相对次序与收集时一致（否则每轮表态后
+ * 卡片会重排，用户会找不到刚看过的那条）。
+ */
+function orderDefects(defects: readonly WireDefect[]): WireDefect[] {
+  return defects
+    .map((defect, index) => ({ defect, index }))
+    .sort((left, right) => {
+      const strikeDelta = Number(right.defect.strikesStance === true) - Number(left.defect.strikesStance === true)
+      if (strikeDelta !== 0) return strikeDelta
+      const dimensionDelta = left.defect.dimension.localeCompare(right.defect.dimension, 'zh')
+      if (dimensionDelta !== 0) return dimensionDelta
+      return left.index - right.index
+    })
+    .map((entry) => entry.defect)
+}
+
+/** 折叠状态的键：`${reviewId}::${defectId}`。 */
+function defectFoldKey(reviewId: string, defectId: string): string {
+  return `${reviewId}::${defectId}`
 }
 
   if (reviews.length === 0) {
@@ -895,7 +947,11 @@ function routeOf(expert: WireExpert | undefined, fallback: string): string {
             {review.defects.length === 0 ? (
               <div className={styles.muted}>{t('defectEmpty')}</div>
             ) : (
-              review.defects.map((defect) => (
+              orderDefects(review.defects).map((defect) => {
+                // 默认折叠：只有点开过（或显式展开）的才显示细节。
+                const foldKey = defectFoldKey(review.reviewId, defect.id)
+                const isOpen = expandedDefects[foldKey] === true
+                return (
                 <div className={styles.defect} key={defect.id}>
                   <div className={styles.defectHead}>
                     <span className={styles.chip}>{defect.dimension}</span>
@@ -915,8 +971,40 @@ function routeOf(expert: WireExpert | undefined, fallback: string): string {
                       </span>
                       <span className={styles.expertNameStrong}>{defect.expertKey}</span>
                     </span>
+                    {/* 折叠开关：用户要求"每条观点都可以折叠，折叠后只显示标题和对应专家"。
+                        整行摘要都可点，点开才显示正文 / 证据 / 复核。 */}
+                    <button
+                      type="button"
+                      className={styles.foldButton}
+                      aria-expanded={isOpen}
+                      onClick={() => setExpandedDefects((previous) => {
+                        const next = { ...previous }
+                        if (next[foldKey] === true) delete next[foldKey]
+                        else next[foldKey] = true
+                        return next
+                      })}
+                    >
+                      {isOpen ? t('collapseSection') : t('expandSection')}
+                    </button>
                   </div>
 
+                  {/* 标题行：折叠时的唯一可见内容，也是展开时的抬头（用户诉求"最开头立一个标题"）。 */}
+                  <button
+                    type="button"
+                    className={styles.defectTitle}
+                    aria-expanded={isOpen}
+                    onClick={() => setExpandedDefects((previous) => {
+                      const next = { ...previous }
+                      if (next[foldKey] === true) delete next[foldKey]
+                      else next[foldKey] = true
+                      return next
+                    })}
+                  >
+                    {defectTitle(defect.content)}
+                  </button>
+
+                  {isOpen ? (
+                    <>
                   {defect.quote === undefined ? null : <div className={styles.quote}>“{defect.quote}”</div>}
                   <div className={styles.defectContent}>{defect.content}</div>
 
@@ -995,6 +1083,9 @@ function routeOf(expert: WireExpert | undefined, fallback: string): string {
                         : <div className={styles.muted}>{defect.recheck.note}</div>}
                     </div>
                   )}
+
+                    </>
+                  ) : null}
 
                   {defect.status === 'rejected' && defect.rejectReason !== undefined && defect.rejectReason !== '' ? (
                     <div className={styles.rejectReason}>{t('btnReject')}：{defect.rejectReason}</div>
@@ -1085,7 +1176,8 @@ function routeOf(expert: WireExpert | undefined, fallback: string): string {
                     </div>
                   ) : null}
                 </div>
-              ))
+                )
+              })
             )}
 
             {/* ---------------- 次要操作 ----------------
