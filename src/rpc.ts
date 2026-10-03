@@ -31,6 +31,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { applyCollected, collectDefects, planExperts, rosterFrom } from './engine.ts'
 import { registerExpertChild } from './expert-events.ts'
 import { spawnExpert } from './members.ts'
+import { expertPersona } from './redteam.ts'
 import { effectiveDimensions, type PreferenceStore } from './preferences.ts'
 import {
   buildRecheckItems,
@@ -485,6 +486,33 @@ export function registerRpc(ctx: Context, runtime: CrossfireRuntime): RpcDispatc
           const changed = await setDefectStatus(located.stateRoot, reviewId, defectId, status, rejectReason)
           return ok({ changed, status })
         }
+        /* ---------------- 专家原提示词（只读） ----------------
+         *
+         * 用户反馈："红队专家那里，我无法看见它的原本提示词是什么"。persona 由
+         * `expertPersona()` 从记录的 subject/stance/dimensions 现场生成 —— 不落盘、
+         * 不占空间，且永远与真正下发给专家的那份一致（同一次调用同一段逻辑）。
+         *
+         * 只读：不写任何状态，也不参与路由。
+         */
+        case 'crossfire/expert.prompt': {
+          const expertKey = typeof body.expertKey === 'string' ? body.expertKey : ''
+          if (expertKey === '') return fail('payload must be { reviewId, expertKey }')
+          const located = await load(reviewId, session, preferredRoot)
+          const expert = located.record.experts.find((item) => item.key === expertKey)
+          if (expert === undefined) return fail(`no expert "${expertKey}" in this review`)
+          const persona = expertPersona({
+            reviewId: located.record.reviewId,
+            dimension: expert.dimension,
+            title: located.record.subject.title,
+            subject: located.record.subject.content,
+            stance: located.record.stance.text,
+            dimensions: located.record.experts.map((item) => item.dimension),
+            maxOpinions: located.record.experts.length > 0 ? 3 : 0,
+            ...(expert.role === undefined ? {} : { role: expert.role }),
+          })
+          return ok({ expertKey, dimension: expert.dimension, persona })
+        }
+
         /* ---------------- 专家角色定位（卡片上的专家列表可直接编辑） ----------------
          *
          * 用户诉求："我无法对专家列表的专家提示词进行修改"。角色定位进 persona 的

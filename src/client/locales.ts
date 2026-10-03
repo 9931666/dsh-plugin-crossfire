@@ -125,6 +125,8 @@ export type CrossfireKey =
   | 'expertRoleEdit'
   | 'expertRoleSaved'
   | 'expertRoleFromRoster'
+  | 'expertPromptView'
+  | 'expertPromptTitle'
   | 'stanceSectionTitle'
   | 'stanceExpand'
   | 'stanceCollapse'
@@ -315,6 +317,8 @@ export const zh: Record<CrossfireKey, string> = {
   expertRoleEdit: '改角色定位',
   expertRoleSaved: '角色定位已保存',
   expertRoleFromRoster: '（来自阵容预设）',
+  expertPromptView: '查看原提示词',
+  expertPromptTitle: '这位专家的原提示词（只读）',
   stanceSectionTitle: '我的立场与理由',
   stanceExpand: '展开看全文',
   stanceCollapse: '收起立场',
@@ -502,6 +506,8 @@ export const en: Record<CrossfireKey, string> = {
   expertRoleEdit: 'Edit role',
   expertRoleSaved: 'Role saved',
   expertRoleFromRoster: '(from a squad preset)',
+  expertPromptView: 'View original prompt',
+  expertPromptTitle: 'This expert\'s original prompt (read-only)',
   stanceSectionTitle: 'Your position and reasons',
   stanceExpand: 'Expand full text',
   stanceCollapse: 'Collapse stance',

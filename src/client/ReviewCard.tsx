@@ -111,6 +111,10 @@ export function CrossfireCard(props: Partial<CrossfireCardInjected>): ReactEleme
   // 用"展开集合"而不是"折叠集合"，是为了让**默认全部折叠**成为天然行为：集合为空即
   // 全部折叠（用户选择），新收集到的观点也自动折叠，不会因为状态里没有它而突然全展开。
   const [expandedDefects, setExpandedDefects] = useState<Record<string, boolean>>({})
+  // 展开查看的专家原提示词（键 = `${reviewId}::${expertKey}`）。
+  // 每个值只拉一次：host 用同一段 expertPersona() 现场生成，因此不会与真正下发给
+  // 专家的那份产生偏差（用户诉求："我无法看见它的原本提示词是什么"）。
+  const [promptViews, setPromptViews] = useState<Record<string, { persona?: string; error?: string }>>({})
   const [dismissBusy, setDismissBusy] = useState(false)
   const alive = useRef(true)
 
@@ -882,10 +886,58 @@ function defectFoldKey(reviewId: string, defectId: string): string {
                         >
                           {t('expertRoleEdit')}
                         </button>
+                        {/* 查看专家原提示词：host 用同一段 expertPersona() 现场生成，
+                            与真正下发给专家的那份一致（只读，不落盘）。 */}
+                        <button
+                          type="button"
+                          className={styles.foldButton}
+                          onClick={() => {
+                            const viewKey = `${review.reviewId}::${expert.key}`
+                            if (promptViews[viewKey] !== undefined) {
+                              setPromptViews((previous) => {
+                                const next = { ...previous }
+                                delete next[viewKey]
+                                return next
+                              })
+                              return
+                            }
+                            setPromptViews((previous) => ({ ...previous, [viewKey]: {} }))
+                            void (async () => {
+                              const result = await rpc<{ persona: string }>('crossfire/expert.prompt', {
+                                reviewId: review.reviewId,
+                                stateRoot: review.stateRoot,
+                                session: sessionId,
+                                expertKey: expert.key,
+                              })
+                              if (!alive.current) return
+                              setPromptViews((previous) => ({
+                                ...previous,
+                                [viewKey]: result.ok
+                                  ? { persona: result.value.persona }
+                                  : { error: result.error.message },
+                              }))
+                            })()
+                          }}
+                        >
+                          {t('expertPromptView')}
+                        </button>
                       </div>
                       {expert.role === undefined ? null : (
                         <div className={styles.muted}>{`${t('expertRoleLabel')}：${expert.role}`}</div>
                       )}
+                      {/* 原提示词展开区：只读全文，复用 stanceFull 的可滚动样式（避免新增样式键）。 */}
+                      {(() => {
+                        const view = promptViews[`${review.reviewId}::${expert.key}`]
+                        if (view === undefined) return null
+                        if (view.error !== undefined) return <div className={styles.statusError}>{view.error}</div>
+                        if (view.persona === undefined) return <div className={styles.muted}>{t('loading')}</div>
+                        return (
+                          <div className={styles.section}>
+                            <div className={styles.sectionTitle}>{t('expertPromptTitle')}</div>
+                            <div className={styles.stanceFull}>{view.persona}</div>
+                          </div>
+                        )
+                      })()}
                       {roleEditing === roleKey ? (
                         <div className={styles.roleEditor}>
                           <textarea
