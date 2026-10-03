@@ -66,6 +66,15 @@ export interface Config {
   memberMaxDepth?: number
   /** 用法段在全局系统提示里的排序位（默认 117，避开圆桌的 116）。 */
   promptSectionOrder?: number
+  /**
+   * 专家**继承主持人**时实际生效的模型路由（provider / model）。
+   *
+   * 它只影响可观测性：开打时把这个生效值写回专家记录，卡片才能把"继承"画成真实
+   * 品牌（DeepSeek 的蓝色 DS 块），而不是一个中性灰 `?`。取不到时不写，界面会退化成
+   * `?` + `title="继承主持人"`，不会显示一个并非事实的路由。
+   */
+  defaultProvider?: string
+  defaultModel?: string
 }
 
 /**
@@ -83,6 +92,9 @@ export const Config = z.object({
   maxExperts: z.natural().min(1).default(7),
   defaultIntensity: z.union(['quick', 'standard', 'deep']).default('standard'),
   memberMaxDepth: z.natural().default(1),
+  // 专家继承主持人时的生效路由（只为把"继承"画成真实品牌块，不参与任何路由决策）。
+  defaultProvider: z.string().default('deepseek-official'),
+  defaultModel: z.string().default('deepseek-v4-flash'),
   promptSectionOrder: z.natural().default(117),
 })
 
@@ -93,6 +105,8 @@ export function apply(ctx: Context, config: Config): void {
     maxExperts: config.maxExperts ?? 7,
     defaultIntensity: config.defaultIntensity ?? 'standard',
     memberMaxDepth: config.memberMaxDepth ?? 1,
+    defaultProvider: config.defaultProvider ?? 'deepseek-official',
+    defaultModel: config.defaultModel ?? 'deepseek-v4-flash',
   }
 
   // 用法段进全局系统提示。文本住在 prompt.ts，便于测试断言体积。
@@ -120,6 +134,9 @@ export function apply(ctx: Context, config: Config): void {
       stateDir: resolved.stateDir,
       memberProvider: resolved.memberProvider,
       maxExperts: resolved.maxExperts,
+      // 专家继承主持人时的生效路由：只为把"继承"画成真实品牌块（见 members.ts）。
+      defaultProvider: resolved.defaultProvider,
+      defaultModel: resolved.defaultModel,
       ...(resolved.memberMaxDepth === undefined ? {} : { memberMaxDepth: resolved.memberMaxDepth }),
       // 观点拆分的 LLM 路由：默认 deepseek-official/deepseek-v4-flash（圆桌实测可用）。
       // 取不到 llm 服务或该路由不可用时，collect 自动退到本地启发式兜底（零 token、

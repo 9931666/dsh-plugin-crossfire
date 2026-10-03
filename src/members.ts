@@ -46,6 +46,14 @@ export interface MemberRuntimeConfig {
   provider: string
   /** 委派深度上限（默认 1：红队专家不得再招人）。 */
   maxDepth?: number
+  /**
+   * 专家**继承**主持人时实际生效的模型路由。
+   *
+   * 只为可观测性：写回记录后卡片才能把"继承"画成真实品牌（DeepSeek 的蓝色 DS 块），
+   * 而不是一个中性灰 `?`。取不到时不写（界面退化为 `?` + "继承主持人"提示）。
+   */
+  defaultProvider?: string
+  defaultModel?: string
 }
 
 /** 一位专家的输出限制。 */
@@ -113,6 +121,21 @@ export async function spawnExpert(
   }
   if (limits.maxTokens !== undefined && limits.maxTokens > 0) {
     agentOptions.maxTokens = limits.maxTokens
+  }
+
+  // 把这位专家**实际使用的路由**写回记录。
+  //
+  // 这是一处真实缺陷的修复：此前只有"显式指定过路由"的记录才带 provider/model，
+  // 于是继承主持人的专家在卡片上永远显示中性灰 `?` —— 而"继承"本该看得见
+  // （用户反馈："专家头像虽然说本次是继承主持人，那么继承你的话应该是 deepseek，
+  // 头像并没有用"）。写回的是**生效值**：显式指定优先，否则用宿主默认路由。
+  if (agentOptions.provider !== undefined) expert.provider = agentOptions.provider
+  else if (config.defaultProvider !== undefined && config.defaultProvider !== '') {
+    expert.provider = config.defaultProvider
+  }
+  if (agentOptions.model !== undefined) expert.model = agentOptions.model
+  else if (expert.provider !== undefined && config.defaultModel !== undefined && config.defaultModel !== '') {
+    expert.model = config.defaultModel
   }
 
   const started = await ctx.subagents.startContinuable({

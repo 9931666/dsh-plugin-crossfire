@@ -66,6 +66,14 @@ export interface ToolsConfig {
   memberProvider: string
   maxExperts: number
   memberMaxDepth?: number
+  /**
+   * 专家**继承主持人**时实际生效的模型路由。
+   *
+   * 只为可观测性：开打时把这个生效值写回专家记录，卡片才能把"继承"画成真实品牌
+   * （DeepSeek 的蓝色 DS 块），而不是中性灰 `?`。它不参与任何路由决策。
+   */
+  defaultProvider?: string
+  defaultModel?: string
   /** 观点拆分的 LLM 路由（不可用时自动退到本地兜底）。 */
   reviewSplit: ReviewSplitConfig
   /** 实时读取的默认值。 */
@@ -158,6 +166,9 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
   const memberConfig: MemberRuntimeConfig = {
     provider: config.memberProvider,
     ...(config.memberMaxDepth === undefined ? {} : { maxDepth: config.memberMaxDepth }),
+    // 专家继承主持人时的生效路由：写回记录后卡片才能把"继承"画成真实品牌块。
+    ...(config.defaultProvider === undefined ? {} : { defaultProvider: config.defaultProvider }),
+    ...(config.defaultModel === undefined ? {} : { defaultModel: config.defaultModel }),
   }
 
   /* ================================================================ *

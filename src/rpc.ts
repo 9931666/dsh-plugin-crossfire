@@ -679,7 +679,14 @@ async function advance(
       try {
         const childId = await spawnExpert(
           ctx,
-          { provider: runtime.tools.memberProvider, ...(runtime.tools.memberMaxDepth === undefined ? {} : { maxDepth: runtime.tools.memberMaxDepth }) },
+          {
+            provider: runtime.tools.memberProvider,
+            ...(runtime.tools.memberMaxDepth === undefined ? {} : { maxDepth: runtime.tools.memberMaxDepth }),
+            // 专家继承主持人时的生效路由：写回记录后卡片才能把"继承"画成真实品牌块
+            // （否则头像永远是中性灰 `?`，这条是用户反馈的缺陷）。
+            ...(runtime.tools.defaultProvider === undefined ? {} : { defaultProvider: runtime.tools.defaultProvider }),
+            ...(runtime.tools.defaultModel === undefined ? {} : { defaultModel: runtime.tools.defaultModel }),
+          },
           planned.record,
           expert,
           agent,
