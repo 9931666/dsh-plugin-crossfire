@@ -286,7 +286,13 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
       if (reviewId === '') throw new Error('review_id must not be empty')
       const defaults = config.getDefaults()
 
-      // 第一段：锁内校验状态并确定阵容（快操作）。
+      // 状态门禁 + 规划 + spawn + 写回**全在同一个临界区里**（A4 + A6，与 rpc.ts 的
+      // 卡片路径同构）。此前 spawn 在锁外，两个并发调用都能通过门禁、各自拉起一批
+      // 专家，而后一批的写回把前一批的 experts 整批覆盖 —— 前一批已经真的跑起来
+      // （正花着用户的 token），却再没人跟踪它们的 childId。
+      //
+      // 代价（刻意的）：拉起 N 位专家期间同一场评审的其它写操作会排队。同一场评审的
+      // 写本就该串行，这里只是把这条不变量贯彻到底。
       const planned = await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
         const record = await requireRecord(stateRoot, reviewId)
         requireOwner(record, caller.id)
@@ -296,6 +302,20 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
         // 攻击会绕过复审流程，而卡片在 settled 上根本没有攻击按钮（与 rpc.ts 的同一
         // 道门禁对齐；红队在验收里指出过这条放行是一条谁也点不到的死路径）。
         requireStatus(record, ['draft', 'attacking'])
+        // A4 的第二道判据：这一场评审**已经有一批专家在跑**。
+        //
+        // `attacking` 必须仍是合法起点（复审轮 settled → recheck → attacking 之后要能
+        // 再开打），所以判据只能是"记录里有没有 running 的专家"：有 = 这一批还没结束，
+        // 拒绝重复启动（放行会覆盖掉正在跑的 childId）；一个都没有（全部 done/silent/
+        // failed，或刚开轮 experts 为空）= 允许 —— "上一批全部 failed 后用户重试"走的
+        // 正是这条路。
+        const running = record.experts.filter((expert) => expert.status === 'running')
+        if (running.length > 0) {
+          throw new Error(
+            `experts are already running for review "${reviewId}" (${running.map((expert) => expert.key).join(', ')}) — `
+            + 'wait for them to report, or collect what they have already submitted',
+          )
+        }
 
         const spec = INTENSITY_SPECS[record.intensity]
         const experts: RedTeamExpert[] = []
@@ -321,48 +341,45 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
         }
         record.experts = trimmed
         record.status = 'attacking'
+        // 先落一次盘再拉起：卡片立刻能看到 attacking + pending，不必等所有子代理都起来。
         await writeRecord(stateRoot, record)
-        return { record, experts: trimmed }
-      })
 
-      // 第二段：锁外拉起子代理（慢操作，且不能占着锁）。
-      const failures: string[] = []
-      for (const expert of planned.experts) {
-        // 每位专家一个独立的 signal：它必须在本次工具调用返回之后继续跑，
-        // 所以不能绑定调用方的生命周期。
-        const controller = new AbortController()
-        try {
-          const childId = await spawnExpert(
-            ctx,
-            memberConfig,
-            planned.record,
-            expert,
-            caller,
-            controller.signal,
-            { maxTokens: defaults.expertMaxTokens, maxOpinions: defaults.expertMaxOpinions },
-          )
-          expert.childId = childId
-          expert.status = 'running'
-          registerExpertChild(childId, { stateRoot, reviewId })
-        } catch (error: unknown) {
-          expert.status = 'failed'
-          expert.note = error instanceof Error ? error.message : String(error)
-          failures.push(`${expert.key}: ${expert.note}`)
+        // 拉起子代理：每位专家一个独立的 signal（它必须在本次调用返回之后继续跑，
+        // 所以不能绑定调用方的生命周期）。
+        const failures: string[] = []
+        for (const expert of trimmed) {
+          const controller = new AbortController()
+          try {
+            const childId = await spawnExpert(
+              ctx,
+              memberConfig,
+              record,
+              expert,
+              caller,
+              controller.signal,
+              { maxTokens: defaults.expertMaxTokens, maxOpinions: defaults.expertMaxOpinions },
+            )
+            expert.childId = childId
+            expert.status = 'running'
+            registerExpertChild(childId, { stateRoot, reviewId })
+          } catch (error: unknown) {
+            expert.status = 'failed'
+            expert.note = error instanceof Error ? error.message : String(error)
+            failures.push(`${expert.key}: ${expert.note}`)
+          }
         }
-      }
-
-      // 第三段：把 childId / 状态写回。
-      await mutateRecord(stateRoot, reviewId, (record) => {
-        record.experts = planned.experts
-        return undefined
+        // 写回 childId / status（以及 spawnExpert 落下的 persona）。
+        record.experts = trimmed
+        await writeRecord(stateRoot, record)
+        return { record, experts: trimmed, failures }
       })
 
       return {
         spawned: planned.experts.filter((expert) => expert.status === 'running').length,
-        failed: failures.length,
+        failed: planned.failures.length,
         dimensions: planned.record.dimensions,
         review_pass: planned.record.reviewPass,
-        failures,
+        failures: planned.failures,
       }
     },
   }))
@@ -405,38 +422,47 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
       const reviewId = text(args.review_id)
       if (reviewId === '') throw new Error('review_id must not be empty')
 
-      const record = await requireRecord(stateRoot, reviewId)
-      requireOwner(record, caller.id)
-      requireStatus(record, ['attacking', 'judging'])
+      // 状态门禁 + 读转录 + 拆分 + 合并写回**全在同一个临界区里**（A2 + A6，与 rpc.ts
+      // 的卡片路径同构）：此前是"锁外读快照 → 锁外拆分 → 锁内纯拼接"，两次调用会基于
+      // 同一份旧快照各拆一遍，裁决面上出现重复缺陷。整段串行化之后，第二次进来时锁内
+      // 读到的已是第一批的结果，`collectDefects` 的 utteranceId 幂等键直接命中，
+      // `applyCollected` 的 id 幂等键是第二道闸。
+      //
+      // 代价（刻意的）：拆分走 LLM 是十秒级的，持锁期间同一场评审的其它写操作会排队。
+      return await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
+        const record = await requireRecord(stateRoot, reviewId)
+        requireOwner(record, caller.id)
+        requireStatus(record, ['attacking', 'judging'])
 
-      const transcript = await readTranscriptReport(stateRoot, reviewId)
-      const llm = ctx.get('llm') as SplitLlmLike | undefined
-      // 拆分 + 噪音过滤 + 维度归一化 + 历史去重全在 engine 里：**单点实现**，因为
-      // 浏览器 RPC 的直推按钮（O1）走的是同一段逻辑，复制一份必然分叉。
-      const outcome = await collectDefects({
-        record,
-        transcript: transcript.items,
-        malformed: transcript.malformed,
-        llm,
-        splitConfig: config.reviewSplit,
+        const transcript = await readTranscriptReport(stateRoot, reviewId)
+        const llm = ctx.get('llm') as SplitLlmLike | undefined
+        // 拆分 + 噪音过滤 + 维度归一化 + 历史去重全在 engine 里：**单点实现**，因为
+        // 浏览器 RPC 的直推按钮（O1）走的是同一段逻辑，复制一份必然分叉。
+        const outcome = await collectDefects({
+          record,
+          transcript: transcript.items,
+          malformed: transcript.malformed,
+          llm,
+          splitConfig: config.reviewSplit,
+        })
+
+        // 返回的 `collected` 是**真正追加的条数**：并发的第二次调用一条都不该新增，
+        // 报 `outcome.added.length` 会让用户看到"新增 N 条"而列表里一条没变。
+        const appended = applyCollected(record, outcome.added)
+        record.status = 'judging'
+        await writeRecord(stateRoot, record)
+
+        return {
+          collected: appended,
+          dropped_duplicates: outcome.droppedDuplicates,
+          skipped_noise: outcome.skippedNoise,
+          split_attempts: outcome.splitAttempts,
+          malformed_lines: outcome.malformedLines,
+          total_defects: record.defects.length,
+          status: record.status,
+          recheck_round: record.reviewPass > 1 && record.history.length > 0,
+        }
       })
-
-      const result = await mutateRecord(stateRoot, reviewId, (current) => {
-        applyCollected(current, outcome.added)
-        current.status = 'judging'
-        return { total: current.defects.length, status: current.status }
-      })
-
-      return {
-        collected: outcome.added.length,
-        dropped_duplicates: outcome.droppedDuplicates,
-        skipped_noise: outcome.skippedNoise,
-        split_attempts: outcome.splitAttempts,
-        malformed_lines: outcome.malformedLines,
-        total_defects: result?.total ?? record.defects.length,
-        status: result?.status ?? 'judging',
-        recheck_round: record.reviewPass > 1 && record.history.length > 0,
-      }
     },
   }))
 

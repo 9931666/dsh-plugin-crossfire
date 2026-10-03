@@ -95,12 +95,20 @@ export function planExperts(
       }
       if (matched !== undefined) {
         if (matched.role !== undefined && matched.role.trim() !== '') expert.role = matched.role.trim()
-        // provider 与 model 必须**成对**写入：`members.ts` 只在两者都在时才把它们
-        // 交给 agentOptions，只写一个会得到一个 provider/model 不匹配的路由。
-        if (matched.provider !== undefined && matched.model !== undefined) {
-          expert.provider = matched.provider
-          expert.model = matched.model
-        }
+        // provider 与 model **各自独立**写入（A5）。
+        //
+        // 此前这里要求两者**成对**（`provider !== undefined && model !== undefined`），
+        // 于是"只填了 provider"或"只填了 model"的阵容成员会被整条静默丢弃 ——
+        // 用户配了半条路由、界面上什么都没发生，也没有任何提示。
+        //
+        // 成对要求本身是错的：`AgentOptions` 的 `provider?` / `model?` 各自独立可选
+        // （见 `@deepseek-ai/dsh-agent` 的 runtime-types：只给 provider 时该 provider
+        // 自会选它的默认模型），所以半配置是**合法**输入，不是错误输入。
+        //
+        // 空串/纯空白与"缺席"同义：宁可保持"缺失 = 继承"，也不要写一个空字符串让
+        // 下游以为拿到了一条路由。
+        if (matched.provider !== undefined && matched.provider.trim() !== '') expert.provider = matched.provider.trim()
+        if (matched.model !== undefined && matched.model.trim() !== '') expert.model = matched.model.trim()
       }
       experts.push(expert)
     }
@@ -335,10 +343,37 @@ export function rosterFrom(input: {
 
 /**
  * 把收集结果并入记录（原地修改；调用方负责落盘）。
+ *
+ * ## 幂等（A2）
+ *
+ * 此前是纯拼接（`[...record.defects, ...added]`），于是**同一条发言被收集两次**
+ * 就在裁决面上出现两条一模一样的缺陷：重试、双击、两个并发请求都能触发它。
+ * 用户面对的是一个"必须点两次驳回、理由还得写两遍"的列表。
+ *
+ * 现在按 `defect.id` 去重（`id` 由 `collectDefects` 从 `utteranceId` + 序号生成，
+ * 因此同一批输入两次得到同一批 id）：**保留先到的那一条**，后来的同 id 项直接丢弃。
+ * 保留先到的而不是新的，是因为"用户已经开始表态"的那一条不能被后来的副本顶掉
+ * （缺陷的三态与驳回理由挂在 id 上，换掉实例等于丢掉已做出的判断）。
+ *
+ * `collectDefects` 里的 `utteranceId` 幂等键是第一道闸，这里的是第二道：前者防的是
+ * "转录又被读了一遍"，后者防的是"合并写回被施加了同一批结果" —— 两道都需要，
+ * 因为并发请求可以在第一道闸之后、第二道闸之前交错。
+ *
+ * @returns **实际追加的条数**（被去重丢弃的不算）。调用方必须如实上报这个数字，
+ *          而不是 `added.length` —— 那会把"请求成功了但什么都没新增"报成
+ *          "新增了 N 条"，用户看到条数却对不上列表。
  */
-export function applyCollected(record: CrossfireRecord, added: readonly Defect[]): void {
-  record.defects = [...record.defects, ...added]
+export function applyCollected(record: CrossfireRecord, added: readonly Defect[]): number {
+  const known = new Set(record.defects.map((defect) => defect.id))
+  const fresh: Defect[] = []
+  for (const defect of added) {
+    if (known.has(defect.id)) continue
+    known.add(defect.id)
+    fresh.push(defect)
+  }
+  record.defects = [...record.defects, ...fresh]
   for (const expert of record.experts) {
     expert.defectCount = record.defects.filter((defect) => defect.expertKey === expert.key).length
   }
+  return fresh.length
 }

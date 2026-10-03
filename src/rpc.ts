@@ -58,7 +58,7 @@ import {
   writeTextAtomic,
   writeTextAtomicWithBom,
 } from './state.ts'
-import { DIMENSION_POOL, INTENSITY_SPECS, type CrossfireRecord, type Intensity } from './types.ts'
+import { DIMENSION_POOL, INTENSITY_SPECS, type CrossfireRecord, type Intensity, type PassSnapshot } from './types.ts'
 import { workspaceRegistryOf } from './harness-compat.ts'
 import type { SplitLlmLike } from './split.ts'
 import { assertBudget, beginPass } from './budget.ts'
@@ -488,9 +488,20 @@ export function registerRpc(ctx: Context, runtime: CrossfireRuntime): RpcDispatc
         }
         /* ---------------- 专家原提示词（只读） ----------------
          *
-         * 用户反馈："红队专家那里，我无法看见它的原本提示词是什么"。persona 由
-         * `expertPersona()` 从记录的 subject/stance/dimensions 现场生成 —— 不落盘、
-         * 不占空间，且永远与真正下发给专家的那份一致（同一次调用同一段逻辑）。
+         * 用户反馈："红队专家那里，我无法看见它的原本提示词是什么"。
+         *
+         * ## "原提示词"必须是**真的那一份**（红队抓出的缺陷，两处成因都修了）
+         *
+         * 1. **优先返回落盘的那一份**（`expert.persona`，由 `members.ts` 在
+         *    `startContinuable` 成功之后写入，与真正下发给子代理的是**同一次调用的
+         *    返回值**）。这是根本修法：persona 是从记录现场重建的，而攻击开始后用户
+         *    还能改 role、改立场 —— 已下发的那一份不会变，现场重建出来的却是新文本。
+         *    拿新文本当"原文"展示，是一句看起来精确、实际是伪造的原文。
+         * 2. **只有旧记录（缺该字段）才现场重建**，且重建必须与真实下发**同源**：
+         *    维度取 `record.dimensions`（本次评审采用的维度）而不是
+         *    `record.experts.map(...)`（那已经按上限截断、还可能重复），条数取运行时
+         *    的 `defaults.expertMaxOpinions`（设置页可调）而不是硬编码的 3 ——
+         *    `members.ts` 下发的正是这两个来源。
          *
          * 只读：不写任何状态，也不参与路由。
          */
@@ -500,17 +511,20 @@ export function registerRpc(ctx: Context, runtime: CrossfireRuntime): RpcDispatc
           const located = await load(reviewId, session, preferredRoot)
           const expert = located.record.experts.find((item) => item.key === expertKey)
           if (expert === undefined) return fail(`no expert "${expertKey}" in this review`)
+          if (expert.persona !== undefined && expert.persona !== '') {
+            return ok({ expertKey, dimension: expert.dimension, persona: expert.persona, rebuilt: false })
+          }
           const persona = expertPersona({
             reviewId: located.record.reviewId,
             dimension: expert.dimension,
             title: located.record.subject.title,
             subject: located.record.subject.content,
             stance: located.record.stance.text,
-            dimensions: located.record.experts.map((item) => item.dimension),
-            maxOpinions: located.record.experts.length > 0 ? 3 : 0,
+            dimensions: located.record.dimensions,
+            maxOpinions: runtime.tools.getDefaults().expertMaxOpinions,
             ...(expert.role === undefined ? {} : { role: expert.role }),
           })
-          return ok({ expertKey, dimension: expert.dimension, persona })
+          return ok({ expertKey, dimension: expert.dimension, persona, rebuilt: true })
         }
 
         /* ---------------- 专家角色定位（卡片上的专家列表可直接编辑） ----------------
@@ -649,8 +663,6 @@ async function advance(
   const defaults = runtime.tools.getDefaults()
 
   if (step === 'attack') {
-    const record = await readRecord(stateRoot, reviewId)
-    if (record === undefined) return fail(`no review "${reviewId}"`)
     // 拉起子代理必须有父 Agent。身份已由 load() 严格校验过，这里直接用调用方声称
     // 的会话 —— **刻意不退回记录里的 owner**：那把凭据同时是权限，退回它等于给空
     // 会话开一条能真正拉起专家的越权通道（红队在验收流程里抓到的真实缺陷）。
@@ -663,12 +675,20 @@ async function advance(
       )
     }
 
-    // 状态门禁与写入必须在**同一个临界区**里。锁外检查、锁内重读却不重校，会留下一个
-    // TOCTOU 窗口：两个并发请求都能通过检查，各自拉起一批专家，第二批覆盖第一批的
-    // experts，第一批就成了没人跟踪的孤儿。
-    const planned = await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
+    // 状态门禁 + 规划 + spawn + 写回**全部在同一个临界区里**（A4 + A6）。
+    //
+    // 此前只有"门禁 + 规划"在锁内，spawn 与写回在锁外，于是存在一个真实的并发窗口：
+    // 两个请求都能通过门禁（各自看到 status=attacking、没有任何 running 专家），各自
+    // 拉起一批专家，而第二批的写回把第一批的 experts 整批覆盖 —— 第一批已经真的跑起来
+    // 了（正花着用户的 token），却再没有任何人跟踪它们的 childId，收集阶段也拿不到它们
+    // 的产出。把 spawn 纳进同一个临界区后，第二个请求拿到锁时读到的是第一批的最终状态，
+    // 直接命中下面那条"已有在跑的专家"判据。
+    //
+    // 代价（刻意的）：拉起 N 位专家期间，同一场评审的其它写操作会排队。同一场评审的写
+    // 本就该串行，这里只是把这条不变量贯彻到底 —— 用"排队等待"换"不再产生孤儿专家"。
+    return await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
       const current = await readRecord(stateRoot, reviewId)
-      if (current === undefined) throw new Error(`no review "${reviewId}"`)
+      if (current === undefined) return fail(`no review "${reviewId}"`)
       // 只允许 draft 与 attacking：
       // - draft 是卡片上那个攻击按钮**唯一可见**的状态；
       // - attacking 是复审轮（recheck 之后）的起点。
@@ -676,9 +696,26 @@ async function advance(
       // 不清缺陷），而卡片在 settled 上根本没有攻击按钮 —— 放行它只会造出一条谁也
       // 点不到、却能被直接调用的路径。
       if (current.status !== 'draft' && current.status !== 'attacking') {
-        throw new Error(
+        return fail(
           `review "${reviewId}" is "${current.status}" — cannot send in the red team now `
           + '(call crossfire_recheck to open a new pass on a settled review)',
+        )
+      }
+      // A4 的第二道判据：这一场评审**已经有一批专家在跑**。
+      //
+      // 为什么不能靠"把 attacking 从允许列表里删掉"来解决重复启动：`attacking` 必须
+      // 仍是合法起点 —— 复审轮（settled → recheck → attacking）正是置成 attacking 之后
+      // 才重新开打的，删掉它等于复审永远打不起来。所以判据只能是"记录里有没有 running
+      // 的专家"：
+      // - 有 → 这一批还没结束，拒绝重复启动。放行会**覆盖掉正在跑的 childId**，那些
+      //   专家仍在消耗 token 产出，却再也归不了账；
+      // - 没有（全部 done/silent/failed，或刚开轮 experts 为空）→ 允许启动。
+      //   "上一批全部 failed 之后用户重试"走的正是这条路（见 test/rpc-dispatch.test.mjs）。
+      const running = current.experts.filter((expert) => expert.status === 'running')
+      if (running.length > 0) {
+        return fail(
+          `experts are already running for this review (${running.map((expert) => expert.key).join(', ')}) — `
+          + 'wait for them to report, or collect what they have already submitted',
         )
       }
       // 阵容来源：用户偏好里的**第一套阵容**（没有阵容时退回角色预设，按顺序平铺）。
@@ -708,90 +745,108 @@ async function advance(
       if (isRecheck && current.defects.length === 0) current.defects = buildRecheckItems(current)
       current.experts = experts
       current.status = 'attacking'
+      // 先落一次盘再拉起：卡片立刻能看到 attacking + pending，而不必等所有子代理都
+      // 起来（真实拉起是十秒级的），锁内的记录也因此始终与盘上一致。
       await writeRecord(stateRoot, current)
-      return { record: current, experts }
-    })
 
-    const failures: string[] = []
-    for (const expert of planned.experts) {
-      const controller = new AbortController()
-      try {
-        const childId = await spawnExpert(
-          ctx,
-          {
-            provider: runtime.tools.memberProvider,
-            ...(runtime.tools.memberMaxDepth === undefined ? {} : { maxDepth: runtime.tools.memberMaxDepth }),
-            // 专家继承主持人时的生效路由：写回记录后卡片才能把"继承"画成真实品牌块
-            // （否则头像永远是中性灰 `?`，这条是用户反馈的缺陷）。
-            ...(runtime.tools.defaultProvider === undefined ? {} : { defaultProvider: runtime.tools.defaultProvider }),
-            ...(runtime.tools.defaultModel === undefined ? {} : { defaultModel: runtime.tools.defaultModel }),
-          },
-          planned.record,
-          expert,
-          agent,
-          controller.signal,
-          { maxTokens: defaults.expertMaxTokens, maxOpinions: defaults.expertMaxOpinions },
-        )
-        expert.childId = childId
-        expert.status = 'running'
-        registerExpertChild(childId, { stateRoot, reviewId })
-      } catch (error: unknown) {
-        expert.status = 'failed'
-        expert.note = error instanceof Error ? error.message : String(error)
-        failures.push(`${expert.key}: ${expert.note}`)
+      const failures: string[] = []
+      for (const expert of experts) {
+        const controller = new AbortController()
+        try {
+          const childId = await spawnExpert(
+            ctx,
+            {
+              provider: runtime.tools.memberProvider,
+              ...(runtime.tools.memberMaxDepth === undefined ? {} : { maxDepth: runtime.tools.memberMaxDepth }),
+              // 专家继承主持人时的生效路由：写回记录后卡片才能把"继承"画成真实品牌块
+              // （否则头像永远是中性灰 `?`，这条是用户反馈的缺陷）。
+              ...(runtime.tools.defaultProvider === undefined ? {} : { defaultProvider: runtime.tools.defaultProvider }),
+              ...(runtime.tools.defaultModel === undefined ? {} : { defaultModel: runtime.tools.defaultModel }),
+            },
+            current,
+            expert,
+            agent,
+            controller.signal,
+            { maxTokens: defaults.expertMaxTokens, maxOpinions: defaults.expertMaxOpinions },
+          )
+          expert.childId = childId
+          expert.status = 'running'
+          registerExpertChild(childId, { stateRoot, reviewId })
+        } catch (error: unknown) {
+          expert.status = 'failed'
+          expert.note = error instanceof Error ? error.message : String(error)
+          failures.push(`${expert.key}: ${expert.note}`)
+        }
       }
-    }
-    await mutateRecord(stateRoot, reviewId, (current) => {
-      current.experts = planned.experts
-      return undefined
-    })
-    return ok({
-      spawned: planned.experts.filter((expert) => expert.status === 'running').length,
-      failed: failures.length,
-      failures,
+      // 写回的是**同一批对象**（`current.experts` 就是 `experts`），所以 childId、
+      // status、以及 spawnExpert 落下的 persona 一并持久化。
+      current.experts = experts
+      await writeRecord(stateRoot, current)
+      return ok({
+        spawned: experts.filter((expert) => expert.status === 'running').length,
+        failed: failures.length,
+        failures,
+      })
     })
   }
 
   if (step === 'collect') {
-    const record = await readRecord(stateRoot, reviewId)
-    if (record === undefined) return fail(`no review "${reviewId}"`)
-    if (record.status !== 'attacking' && record.status !== 'judging') {
-      return fail(`review "${reviewId}" is "${record.status}" — cannot collect now`)
-    }
-    const transcript = await readTranscriptReport(stateRoot, reviewId)
     const llm = ctx.get('llm') as SplitLlmLike | undefined
-    const outcome = await collectDefects({
-      record,
-      transcript: transcript.items,
-      malformed: transcript.malformed,
-      llm,
+    // 状态门禁 + 读转录 + 拆分 + 合并写回**全部在同一个临界区里**（A2 + A6）。
+    //
+    // 此前是"锁外读快照 → 锁外拆分 → 锁内纯拼接"：两次点击（或两个并发请求）都基于
+    // 同一份旧快照拆分，第二批的 `added` 又被拼进 defects —— 裁决面上于是出现一条条
+    // 一模一样的重复缺陷，用户得对同一条缺陷点两次驳回、理由写两遍。现在整段串行化：
+    // 第二次进来时锁内读到的已经是第一批的结果，`collectDefects` 的 `utteranceId`
+    // 幂等键直接命中，`applyCollected` 的 `id` 幂等键是第二道闸。
+    //
+    // 代价（刻意的）：拆分走 LLM 是十秒级的，持锁期间同一场评审的其它写操作会排队。
+    // 同一场评审的写本就该串行 —— 用"排队"换"列表里不再出现重复项"。
+    return await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
+      const current = await readRecord(stateRoot, reviewId)
+      if (current === undefined) return fail(`no review "${reviewId}"`)
+      if (current.status !== 'attacking' && current.status !== 'judging') {
+        return fail(`review "${reviewId}" is "${current.status}" — cannot collect now`)
+      }
+      const transcript = await readTranscriptReport(stateRoot, reviewId)
       // 拆分阶段的有界并发上限住在 `reviewSplit` 里（engine 单点读取），
       // 因此这里不必单独传参 —— 工具侧读同一份配置，两边行为一致。
-      splitConfig: runtime.tools.reviewSplit,
-    })
-    await mutateRecord(stateRoot, reviewId, (current) => {
-      applyCollected(current, outcome.added)
+      const outcome = await collectDefects({
+        record: current,
+        transcript: transcript.items,
+        malformed: transcript.malformed,
+        llm,
+        splitConfig: runtime.tools.reviewSplit,
+      })
+      // `collected` 报的是**真正追加的条数**，不是 `added.length`：并发的第二次调用
+      // 一条都不该新增，报 added.length 会让用户看到"新增 3 条"而列表里一条没变。
+      const appended = applyCollected(current, outcome.added)
       current.status = 'judging'
-      return undefined
-    })
-    return ok({
-      collected: outcome.added.length,
-      droppedDuplicates: outcome.droppedDuplicates,
-      skippedNoise: outcome.skippedNoise,
-      splitAttempts: outcome.splitAttempts,
-      recheckRound: record.reviewPass > 1 && record.history.length > 0,
+      await writeRecord(stateRoot, current)
+      return ok({
+        collected: appended,
+        droppedDuplicates: outcome.droppedDuplicates,
+        skippedNoise: outcome.skippedNoise,
+        splitAttempts: outcome.splitAttempts,
+        recheckRound: current.reviewPass > 1 && current.history.length > 0,
+      })
     })
   }
 
   if (step === 'finish') {
     const summary = typeof body.summary === 'string' ? body.summary.trim() : ''
-    const record = await readRecord(stateRoot, reviewId)
-    if (record === undefined) return fail(`no review "${reviewId}"`)
-    if (record.status !== 'judging' && record.status !== 'attacking' && record.status !== 'settled') {
-      return fail(`review "${reviewId}" is "${record.status}" — cannot settle now`)
-    }
-    const result = await mutateRecord(stateRoot, reviewId, (current) => {
-      current.history = [...current.history, {
+    // 状态门禁 + 追加历史 + 置 settled 全在同一个临界区里（A6）。
+    //
+    // 此前门禁在锁外、锁内的 `mutateRecord` 回调又不重校状态，于是并发两次 finish
+    // 会各自追加一条**同一个 pass** 的 history 快照 —— "这一轮定稿"在历史里出现两次，
+    // 复审时同一批旧账被核对两遍。
+    return await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
+      const current = await readRecord(stateRoot, reviewId)
+      if (current === undefined) return fail(`no review "${reviewId}"`)
+      if (current.status !== 'judging' && current.status !== 'attacking' && current.status !== 'settled') {
+        return fail(`review "${reviewId}" is "${current.status}" — cannot settle now`)
+      }
+      const snapshot: PassSnapshot = {
         pass: current.reviewPass,
         subject: current.subject.content,
         stanceText: current.stance.text,
@@ -800,27 +855,38 @@ async function advance(
         defects: current.defects.map((defect) => ({ ...defect })),
         finishedAt: Date.now(),
         ...(summary === '' ? {} : { revisedSummary: summary }),
-      }]
+      }
+      // **同一 pass 在 history 里只能有一条**：已存在就原地更新它。重复定稿应当是一次
+      // 幂等的更新（用户改完表态又点一次定稿是合法操作），而不是又叠一份快照 ——
+      // 叠出来的历史会让复审把同一批旧账核对两遍，且先写的那份永远是最旧的。
+      const existing = current.history.findIndex((item) => item.pass === current.reviewPass)
+      if (existing >= 0) current.history[existing] = snapshot
+      else current.history = [...current.history, snapshot]
       current.status = 'settled'
       current.settledAt = Date.now()
-      return countDefects(current)
+      await writeRecord(stateRoot, current)
+      return ok({ settled: true, counts: countDefects(current) })
     })
-    return ok({ settled: true, counts: result ?? countDefects(record) })
   }
 
   // step === 'recheck'
-  const record = await readRecord(stateRoot, reviewId)
-  if (record === undefined) return fail(`no review "${reviewId}"`)
-  if (record.status !== 'settled') return fail(`review "${reviewId}" is "${record.status}" — only a settled review can be re-checked`)
   const approved = body.approved === true
-  const nextPass = record.reviewPass + 1
-  if (nextPass > record.maxReviewPass && !approved) {
-    return fail(
-      `re-review cap reached (pass ${nextPass} > max ${record.maxReviewPass}) — the user must approve continuing`,
-      'cap-reached',
-    )
-  }
-  const result = await mutateRecord(stateRoot, reviewId, (current) => {
+  // 状态门禁 + 轮次上限判定 + 开轮写回全在同一个临界区里（A6）：并发两次 recheck
+  // 此前会各自基于同一份旧快照 `+1`，把同一批旧账开成两轮（第二次的 defects 又被
+  // 覆盖一遍，预算 usedRounds 却被扣了两次）。
+  return await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
+    const current = await readRecord(stateRoot, reviewId)
+    if (current === undefined) return fail(`no review "${reviewId}"`)
+    if (current.status !== 'settled') {
+      return fail(`review "${reviewId}" is "${current.status}" — only a settled review can be re-checked`)
+    }
+    const nextPass = current.reviewPass + 1
+    if (nextPass > current.maxReviewPass && !approved) {
+      return fail(
+        `re-review cap reached (pass ${nextPass} > max ${current.maxReviewPass}) — the user must approve continuing`,
+        'cap-reached',
+      )
+    }
     const items = buildRecheckItems(current)
     current.reviewPass = beginPass(current)
     if (approved) current.maxReviewPass = Math.max(current.maxReviewPass, current.reviewPass)
@@ -828,9 +894,9 @@ async function advance(
     current.experts = []
     current.status = 'attacking'
     current.settledAt = undefined
-    return { pass: current.reviewPass, items: items.length }
+    await writeRecord(stateRoot, current)
+    return ok({ reviewPass: current.reviewPass, recheckItems: items.length })
   })
-  return ok({ reviewPass: result?.pass ?? nextPass, recheckItems: result?.items ?? 0 })
 }
 
 /* ------------------------------------------------------------------ *

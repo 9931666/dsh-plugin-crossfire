@@ -93,8 +93,15 @@ export const Config = z.object({
   defaultIntensity: z.union(['quick', 'standard', 'deep']).default('standard'),
   memberMaxDepth: z.natural().default(1),
   // 专家继承主持人时的生效路由（只为把"继承"画成真实品牌块，不参与任何路由决策）。
+  //
+  // model 必须与**宿主真实路由同名**：`web` profile 的 agent-default-model 段是
+  // provider `deepseek-official` + model `deepseek-flash`。此前这里写的是
+  // `deepseek-v4-flash`（那是 models 目录里另一个真实存在的 id，也是 collect 拆分用的
+  // 路由），于是继承主持人的专家在卡片上报出一个并非宿主默认值的模型名 —— 一句看起来
+  // 精确、实际不对的显示。**注意不要顺手改 `reviewSplit.model`**：那是观点拆分的真实
+  // 路由，与本字段无关，另有实测依据。
   defaultProvider: z.string().default('deepseek-official'),
-  defaultModel: z.string().default('deepseek-v4-flash'),
+  defaultModel: z.string().default('deepseek-flash'),
   promptSectionOrder: z.natural().default(117),
 })
 
@@ -106,7 +113,9 @@ export function apply(ctx: Context, config: Config): void {
     defaultIntensity: config.defaultIntensity ?? 'standard',
     memberMaxDepth: config.memberMaxDepth ?? 1,
     defaultProvider: config.defaultProvider ?? 'deepseek-official',
-    defaultModel: config.defaultModel ?? 'deepseek-v4-flash',
+    // 与 schema 的默认值**必须同源**：这里是 schema 未生效时（直接调用 apply 的测试、
+    // 或老配置对象）的兜底，两处不同名就会造出"同一次加载两个模型名"的裂缝。
+    defaultModel: config.defaultModel ?? 'deepseek-flash',
   }
 
   // 用法段进全局系统提示。文本住在 prompt.ts，便于测试断言体积。

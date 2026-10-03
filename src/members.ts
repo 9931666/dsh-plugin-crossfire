@@ -49,8 +49,12 @@ export interface MemberRuntimeConfig {
   /**
    * 专家**继承**主持人时实际生效的模型路由。
    *
-   * 只为可观测性：写回记录后卡片才能把"继承"画成真实品牌（DeepSeek 的蓝色 DS 块），
-   * 而不是一个中性灰 `?`。取不到时不写（界面退化为 `?` + "继承主持人"提示）。
+   * 主要用途是可观测性：写回记录后卡片才能把"继承"画成真实品牌（DeepSeek 的蓝色
+   * DS 块），而不是一个中性灰 `?`。取不到时不写（界面退化为 `?` + "继承主持人"提示）。
+   *
+   * 另一处用途（A5）：阵容成员**只填了 model** 时，`defaultProvider` 是真正参与路由
+   * 的那个 provider（补进 agentOptions 并写回记录）。只在纯继承的情形下它才是纯
+   * 可观测值 —— 而且它**不会**被用来顶替某个成员自己指定的 model。
    */
   defaultProvider?: string
   defaultModel?: string
@@ -66,6 +70,87 @@ export interface ExpertRuntimeLimits {
 
 /** 专家子代理的 label 前缀（持久化为该子会话的创建标签，便于在宿主侧辨认）。 */
 const EXPERT_LABEL_PREFIX = 'crossfire-expert:'
+
+/** 取一个"真的写了东西"的字符串；空串与纯空白一律视为**缺席**。 */
+function nonEmpty(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
+}
+
+/** 一位专家最终生效的路由决定。 */
+export interface ExpertRoute {
+  /** 写回记录的 provider；缺席 = "继承 / 未知"（界面退化为中性块，而不是一个假路由）。 */
+  provider?: string
+  /** 写回记录的 model；缺席 = 同上。 */
+  model?: string
+  /** **真正**交给 `startContinuable` 的 agentOptions（空对象 = 完全不干预路由）。 */
+  agentOptions: { provider?: string; model?: string }
+}
+
+/**
+ * 把"专家显式指定的路由"与"宿主默认路由"收敛成一份确定的路由决定（A5 + B3）。
+ *
+ * ## 一条铁律
+ *
+ * **写回记录的值 = 真正下发的值。** 记录与下发必须由**同一次决定**产生，否则界面
+ * 会显示一条并非事实的路由（红队抓出的原缺陷：只填了 provider 的成员，记录里却被
+ * 写成 `defaultProvider` + `defaultModel` —— 界面说跑 A，实际跑 B）。
+ *
+ * ## 四种组合的行为（全都是确定的，没有"看情况"）
+ *
+ * | 专家显式指定 | agentOptions（下发） | 写回记录 |
+ * |---|---|---|
+ * | provider + model | `{provider, model}` | provider、model |
+ * | 只有 provider | `{provider}` | provider（**不补 model**） |
+ * | 只有 model | `{defaultProvider?, model}` | provider（补上的那个）、model |
+ * | 都没有（继承） | `{}`（不干预） | defaultProvider、defaultModel |
+ *
+ * 逐条理由：
+ * - **只有 provider 时刻意不补 model**：`provider` 自己会选它的默认模型，我们没有
+ *   任何依据知道那会是哪一个；拿 `config.defaultModel` 去顶替就是编造（那正是原
+ *   缺陷的写法）。记录的 `model` 缺席是诚实的"不知道"。
+ * - **只有 model 时补 `defaultProvider`**：一个不给 provider 的 model id 在多数路由上
+ *   无法解析，而"只写 model、不写 provider"在用户眼里就是"用默认 provider 跑这个
+ *   模型"。补上的值同时写回记录 —— 于是界面显示的正是真正下发的。
+ * - **都没有时 agentOptions 为空**：这一种情形下我们**不替宿主做决定**，真正的继承
+ *   必须保持是继承。记录里那份 `defaultProvider`/`defaultModel` 是配置里声明的
+ *   "继承主持人时**实际生效**的模型路由"（见 index.ts / ToolsConfig 的同一段注释），
+ *   写它只为把"继承"画成真实品牌块（否则头像永远是中性灰 `?`，那是用户报过的缺陷）。
+ *   这是**唯一**一处记录值不等于 agentOptions 的字段 —— 而它们仍然同源：记录里出现的
+ *   每一个字段，要么是我们显式下发的，要么是宿主默认路由本身。
+ * - **取不到生效值的字段一律不写**（保持"缺失 = 继承"的诚实语义），也不写空串。
+ *
+ * 纯函数：没有 I/O、没有时间、不改入参，所以四种组合都能被单测直接钉住
+ * （见 `test/members.test.mjs`）。
+ */
+export function resolveExpertRoute(
+  expert: { provider?: string; model?: string },
+  config: { defaultProvider?: string; defaultModel?: string },
+): ExpertRoute {
+  const explicitProvider = nonEmpty(expert.provider)
+  const explicitModel = nonEmpty(expert.model)
+  const fallbackProvider = nonEmpty(config.defaultProvider)
+  const fallbackModel = nonEmpty(config.defaultModel)
+
+  const agentOptions: { provider?: string; model?: string } = {}
+  if (explicitProvider !== undefined) agentOptions.provider = explicitProvider
+  // 只有 model：补一个默认 provider，否则这个 model 在多数路由上无解。
+  else if (explicitModel !== undefined && fallbackProvider !== undefined) agentOptions.provider = fallbackProvider
+  if (explicitModel !== undefined) agentOptions.model = explicitModel
+
+  const route: ExpertRoute = { agentOptions }
+  if (agentOptions.provider !== undefined) route.provider = agentOptions.provider
+  else if (explicitProvider === undefined && explicitModel === undefined && fallbackProvider !== undefined) {
+    // 纯继承：写回"宿主默认路由"，只为可观测性（见上面的逐条理由）。
+    route.provider = fallbackProvider
+  }
+  if (agentOptions.model !== undefined) route.model = agentOptions.model
+  else if (explicitProvider === undefined && explicitModel === undefined && fallbackModel !== undefined) {
+    route.model = fallbackModel
+  }
+  return route
+}
 
 /**
  * 拉起一位红队专家，返回它的子会话 id。
@@ -114,29 +199,28 @@ export async function spawnExpert(
 
   // Per-request output cap: model max_tokens applied to every request this
   // expert makes (0/unset = the provider's own default).
-  const agentOptions: { provider?: string; model?: string; maxTokens?: number } = {}
-  if (expert.provider !== undefined && expert.model !== undefined) {
-    agentOptions.provider = expert.provider
-    agentOptions.model = expert.model
-  }
+  //
+  // 路由（provider / model）由 `resolveExpertRoute` **一次决定**，记录与下发共用
+  // 它的结果 —— 不允许出现"记录写 A、实际跑 B"（见该函数的注释）。
+  const route = resolveExpertRoute(expert, config)
+  const agentOptions: { provider?: string; model?: string; maxTokens?: number } = { ...route.agentOptions }
   if (limits.maxTokens !== undefined && limits.maxTokens > 0) {
     agentOptions.maxTokens = limits.maxTokens
   }
 
-  // 把这位专家**实际使用的路由**写回记录。
+  // 把这位专家**实际使用的路由**写回记录：逐字段等于 `route` 的决定，取不到生效值
+  // 就删掉该字段（"缺失 = 继承"必须看得见，而不是留一个空串或上一轮的残值）。
+  if (route.provider === undefined) delete expert.provider
+  else expert.provider = route.provider
+  if (route.model === undefined) delete expert.model
+  else expert.model = route.model
+
+  // persona **只生成一次**：同一个常量既用于下发、也用于落盘。
   //
-  // 这是一处真实缺陷的修复：此前只有"显式指定过路由"的记录才带 provider/model，
-  // 于是继承主持人的专家在卡片上永远显示中性灰 `?` —— 而"继承"本该看得见
-  // （用户反馈："专家头像虽然说本次是继承主持人，那么继承你的话应该是 deepseek，
-  // 头像并没有用"）。写回的是**生效值**：显式指定优先，否则用宿主默认路由。
-  if (agentOptions.provider !== undefined) expert.provider = agentOptions.provider
-  else if (config.defaultProvider !== undefined && config.defaultProvider !== '') {
-    expert.provider = config.defaultProvider
-  }
-  if (agentOptions.model !== undefined) expert.model = agentOptions.model
-  else if (expert.provider !== undefined && config.defaultModel !== undefined && config.defaultModel !== '') {
-    expert.model = config.defaultModel
-  }
+  // 这不是省一次函数调用，而是这个字段的正确性来源：如果下发与落盘各调一次
+  // `expertPersona()`，任何一次参数漂移（或函数内部带了时间戳之类的非纯行为）都会让
+  // "查看原提示词"显示的东西与专家真正收到的东西不是同一份 —— 而那正是我们要修的缺陷。
+  const persona = expertPersona(input)
 
   const started = await ctx.subagents.startContinuable({
     provider: config.provider,
@@ -144,13 +228,16 @@ export async function spawnExpert(
     request: {
       prompt: [{ type: 'text', text: expertWelcome(input) }] as ContentBlock[],
       parent,
-      persona: expertPersona(input),
+      persona,
       toolFilter: expertToolRestriction(),
       ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
       ...(config.maxDepth === undefined ? {} : { maxDepth: config.maxDepth }),
     },
     signal,
   })
+  // 落盘时机**在 startContinuable 成功之后**：拉起失败时什么都不记（调用方会把
+  // status 记成 failed），避免留下一份"看起来下发过、其实没发出去"的原文。
+  expert.persona = persona
   return String(started.childId)
 }
 

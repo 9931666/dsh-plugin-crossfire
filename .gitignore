@@ -19,7 +19,10 @@ lib/types/
 
 # 本地交接文档：含本机绝对路径、会话 id、真实评审数据与本轮开发决策记录。
 # 它服务于"下一个人接着开发"，不属于公开面（公开面看 README + release-notes）。
+# HANDOVER*.md 一律忽略（HANDOVER.md / HANDOVER-NEXT.md / HANDOVER-FIX-*.md）。
 HANDOVER.md
+HANDOVER-NEXT.md
+HANDOVER-FIX-*.md
 
 # 编辑器 / 系统噪音。
 .vscode/

@@ -36,6 +36,12 @@ import {
   type WireReviewStatus,
 } from './wire.ts'
 import { providerBrand, routeText } from './brand.ts'
+import { defectTitle } from './defectTitle.ts'
+import {
+  applyPromptResult,
+  togglePromptView,
+  type PromptViewTable,
+} from './promptView.ts'
 import styles from './ReviewCard.module.css'
 
 /**
@@ -112,9 +118,12 @@ export function CrossfireCard(props: Partial<CrossfireCardInjected>): ReactEleme
   // 全部折叠（用户选择），新收集到的观点也自动折叠，不会因为状态里没有它而突然全展开。
   const [expandedDefects, setExpandedDefects] = useState<Record<string, boolean>>({})
   // 展开查看的专家原提示词（键 = `${reviewId}::${expertKey}`）。
-  // 每个值只拉一次：host 用同一段 expertPersona() 现场生成，因此不会与真正下发给
-  // 专家的那份产生偏差（用户诉求："我无法看见它的原本提示词是什么"）。
-  const [promptViews, setPromptViews] = useState<Record<string, { persona?: string; error?: string }>>({})
+  // 值是**显式三态**（loading / ready / error），不是"缓存里有没有"：那样一个变量
+  // 同时表达"有缓存"与"已展开"两件事，导致"收起即丢缓存、再点变重新请求"，以及
+  // 收起后迟到的响应把面板重新弹出来。状态转移在 promptView.ts 里，可脱离渲染单测。
+  // host 用同一段 expertPersona() 现场生成，因此不会与真正下发给专家的那份产生偏差
+  // （用户诉求："我无法看见它的原本提示词是什么"）。
+  const [promptViews, setPromptViews] = useState<PromptViewTable>({})
   const [dismissBusy, setDismissBusy] = useState(false)
   const alive = useRef(true)
 
@@ -502,28 +511,6 @@ function routeOf(expert: WireExpert | undefined, fallback: string): string {
 }
 
 /**
- * 观点标题：一条缺陷卡片的"抬头"。
- *
- * 红队的报告信封要求每条发言以 `观点 N（指向 X，维度Y）：正文` 开头，而这个前缀
- * 恰恰就是最有信息量的一行（编号 + 定位 + 维度）。用户反馈："观点虽然说我可以理解，
- * 把完整内容给写出来了，但我觉得还是要在最开始那里立一个标题，这样目的明确"。
- *
- * 兜底顺序：① 用信封前缀（`观点 N（指向 X，维度Y）`）→ ② 未按格式提交时取首句
- * （按中英文句号/分号/换行切，限长）。**绝不**返回空串 —— 标题位空了比不显示更糟。
- */
-function defectTitle(content: string): string {
-  const text = content.trim()
-  const envelope = /^(观点\s*\d+\s*[（(][^）)]*[）)])\s*[:：]?/.exec(text)
-  if (envelope !== null && envelope[1] !== undefined) return envelope[1].trim()
-  // 逐句切：先按换行，再按句末标点，取第一个非空片段。
-  const firstSegment = text.split(/\n+/)[0] ?? text
-  const firstSentence = firstSegment.split(/(?<=[。．.；;！!？?])/)[0] ?? firstSegment
-  const title = firstSentence.trim()
-  if (title === '') return text.slice(0, 80)
-  return title.length > 80 ? `${title.slice(0, 80)}…` : title
-}
-
-/**
  * 缺陷排序：**打穿立场的优先**，其次按维度分组，组内保持原始顺序。
  *
  * 这是 §5.3 方向 4 的落地："按维度分组、按是否打穿立场排序，把最需要裁决的排在最前"。
@@ -893,15 +880,15 @@ function defectFoldKey(reviewId: string, defectId: string): string {
                           className={styles.foldButton}
                           onClick={() => {
                             const viewKey = `${review.reviewId}::${expert.key}`
-                            if (promptViews[viewKey] !== undefined) {
-                              setPromptViews((previous) => {
-                                const next = { ...previous }
-                                delete next[viewKey]
-                                return next
-                              })
-                              return
-                            }
-                            setPromptViews((previous) => ({ ...previous, [viewKey]: {} }))
+                            // 无条目 → 展开并拉一次；有条目（loading/ready/error）
+                            // → 只收起。收起**绝不**再发请求，也不丢已拿到的结果。
+                            let start = false
+                            setPromptViews((previous) => {
+                              const toggled = togglePromptView(previous, viewKey)
+                              start = toggled.start
+                              return toggled.table
+                            })
+                            if (!start) return
                             void (async () => {
                               const result = await rpc<{ persona: string }>('crossfire/expert.prompt', {
                                 reviewId: review.reviewId,
@@ -909,13 +896,18 @@ function defectFoldKey(reviewId: string, defectId: string): string {
                                 session: sessionId,
                                 expertKey: expert.key,
                               })
+                              // 卸载即丢弃；"等待期间收起"由 applyPromptResult 内的
+                              // loading 检查负责（alive 只在卸载时变化，挡不住收起）。
                               if (!alive.current) return
-                              setPromptViews((previous) => ({
-                                ...previous,
-                                [viewKey]: result.ok
-                                  ? { persona: result.value.persona }
-                                  : { error: result.error.message },
-                              }))
+                              setPromptViews((previous) =>
+                                applyPromptResult(
+                                  previous,
+                                  viewKey,
+                                  result.ok
+                                    ? { ok: true, persona: result.value.persona }
+                                    : { ok: false, message: result.error.message },
+                                ),
+                              )
                             })()
                           }}
                         >
@@ -929,8 +921,8 @@ function defectFoldKey(reviewId: string, defectId: string): string {
                       {(() => {
                         const view = promptViews[`${review.reviewId}::${expert.key}`]
                         if (view === undefined) return null
-                        if (view.error !== undefined) return <div className={styles.statusError}>{view.error}</div>
-                        if (view.persona === undefined) return <div className={styles.muted}>{t('loading')}</div>
+                        if (view.status === 'error') return <div className={styles.statusError}>{view.message}</div>
+                        if (view.status === 'loading') return <div className={styles.muted}>{t('loading')}</div>
                         return (
                           <div className={styles.section}>
                             <div className={styles.sectionTitle}>{t('expertPromptTitle')}</div>

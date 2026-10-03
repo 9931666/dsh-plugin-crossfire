@@ -205,6 +205,15 @@ function sanitizeExpert(value: unknown): RedTeamExpert | undefined {
   if (model !== undefined) expert.model = model
   const role = asText(raw.role, 2000)
   if (role !== undefined) expert.role = role
+  // 真正下发那份 persona 的逐字副本（见 types.ts 的 `RedTeamExpert.persona`）。
+  //
+  // **这一行是必需的，别删**：本函数是一份**显式字段白名单**，未在此登记的字段会在
+  // 每次 `readRecord()` 时被静默丢弃 —— 于是 persona 会"写进 JSON 却读不回来"，
+  // 端点的"优先返回原文"分支永远走不到，而除了往返断言没有任何东西会报错。
+  // 上限 32_000：persona 的文本上界约 19KB（subject 6KB + stance 4KB + 约束段 +
+  // role 2KB），留足余量才能保证读回的是逐字原文而不是被截断的版本。
+  const persona = asText(raw.persona, 32_000)
+  if (persona !== undefined) expert.persona = persona
   const note = asText(raw.note, 500)
   if (note !== undefined) expert.note = note
   return expert

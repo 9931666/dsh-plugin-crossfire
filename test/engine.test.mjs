@@ -321,3 +321,76 @@ test('applyCollected：并入缺陷并把条数分派给对应专家', () => {
   assert.equal(record.experts[0].defectCount, 1)
   assert.equal(record.experts[1].defectCount, 0)
 })
+
+/* ------------------------------------------------------------------ *
+ * A5：阵容成员的半配置路由
+ * ------------------------------------------------------------------ */
+
+test('planExperts：只填 provider 的成员不再被整条丢弃（半配置是合法输入）', () => {
+  // 这条断言守的是一个真实缺陷：此前 provider 与 model 必须**成对**才写入，于是
+  // 用户"只填了 provider"的阵容成员被整条静默丢弃 —— 界面上什么都没发生、也没有
+  // 任何提示，而 `AgentOptions` 的 provider?/model? 本来就是各自独立可选的。
+  const experts = planExperts(baseRecord(), 7, [{ key: '安全', provider: 'deepseek-official' }])
+  const secure = experts.find((expert) => expert.key === '安全')
+  assert.equal(secure.provider, 'deepseek-official', 'provider 有就写')
+  assert.equal(secure.model, undefined, '没有 model 就保持缺席（不许拿默认值编造）')
+  const other = experts.find((expert) => expert.key === '性能')
+  assert.equal(other.provider, undefined, '没配到的维度照旧什么都不写')
+})
+
+test('planExperts：只填 model 的成员同样写入（不再要求成对）', () => {
+  const experts = planExperts(baseRecord(), 7, [{ key: '安全', model: 'deepseek-flash' }])
+  const secure = experts.find((expert) => expert.key === '安全')
+  assert.equal(secure.model, 'deepseek-flash')
+  assert.equal(secure.provider, undefined, '没有 provider 就不写 —— 补齐发生在 members.ts（要能写回记录）')
+})
+
+test('planExperts：provider 与 model 都填时两者都写入，并去空白', () => {
+  const experts = planExperts(baseRecord(), 7, [{
+    key: '安全', provider: ' p1 ', model: ' m1 ',
+  }])
+  const secure = experts.find((expert) => expert.key === '安全')
+  assert.equal(secure.provider, 'p1')
+  assert.equal(secure.model, 'm1')
+})
+
+test('planExperts：空白 provider / model 一律视为缺席（不写空串）', () => {
+  const experts = planExperts(baseRecord(), 7, [{ key: '安全', provider: '   ', model: '' }])
+  const secure = experts.find((expert) => expert.key === '安全')
+  assert.equal(secure.provider, undefined)
+  assert.equal(secure.model, undefined)
+})
+
+/* ------------------------------------------------------------------ *
+ * A2：collect 的幂等
+ * ------------------------------------------------------------------ */
+
+test('applyCollected：同 id 的缺陷不重复追加，返回值是实际新增条数（A2）', () => {
+  // 这是 collect 幂等的**第二道闸**（第一道是 collectDefects 的 utteranceId 幂等键）。
+  // 两道都需要：并发请求可以在第一道闸之后、第二道闸之前交错。
+  const record = baseRecord()
+  const batch = [{
+    id: 'u1#1', utteranceId: 'u1', expertKey: '安全', content: '重复项', dimension: '安全',
+    status: 'pending', ts: 1, seq: 1,
+  }]
+  assert.equal(applyCollected(record, batch), 1, '第一次追加 1 条')
+  assert.equal(applyCollected(record, batch), 0, '同一批再合并一次：一条都不新增')
+  assert.equal(record.defects.length, 1, '裁决面不得出现重复项')
+})
+
+test('applyCollected：部分重复时只追加新 id，并保留先到的那条', () => {
+  const record = baseRecord()
+  const first = {
+    id: 'u1#1', utteranceId: 'u1', expertKey: '安全', content: '先到的内容', dimension: '安全',
+    status: 'endorsed', ts: 1, seq: 1,
+  }
+  applyCollected(record, [first])
+  const added = applyCollected(record, [
+    { ...first, content: '后来的副本（不得顶掉已表态的那条）' },
+    { id: 'u1#2', utteranceId: 'u1', expertKey: '安全', content: '真新增', dimension: '安全', status: 'pending', ts: 2, seq: 2 },
+  ])
+  assert.equal(added, 1, '只有新 id 被追加')
+  assert.equal(record.defects.length, 2)
+  assert.equal(record.defects[0].content, '先到的内容', '同 id 保留先到的实例（它的三态是用户已做出的判断）')
+  assert.equal(record.defects[0].status, 'endorsed', '已表态的实例不被后来的副本重置')
+})
