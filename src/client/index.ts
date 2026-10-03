@@ -31,6 +31,7 @@ import { CrossfireSettings, type CrossfireSettingsInjected } from './SettingsVie
 import { withSlotBoundary } from './slot-boundary.tsx'
 import { en, NS, zh } from './locales.ts'
 import { callRpc, type RpcCaller, type RpcEnvelope } from './wire.ts'
+import { withSessionIdentity } from './session-cache.ts'
 
 /** Required services: the two slot registries plus locale (see module doc). */
 export const inject = ['slots', 'locale']
@@ -80,8 +81,23 @@ export function apply(ctx: Context): void {
   // ---- Settings page (settings.section) --------------------------------
   // Entry is wrapped in a render-failure boundary: DSH retires a slot entry
   // that throws, which would make a plugin bug look like "这一页根本不存在".
+  // 设置页**拿不到** `sessionId`（宿主 slot 契约：`settings.section` 的 standardProps
+  // 里没有这一项，而 conversation.view / tool.call.toolview 有）。可 `crossfire/prefs.set`
+  // 在宿主侧要求"必须声称一个身份"，于是设置页的每一次保存都被拒成"保存失败" ——
+  // 角色预设 / 阵容预设 / 强度 / 预算**全部存不进去**（用户实测报出的 Bug）。
+  //
+  // 修法不是伪造身份，而是把**真实**身份补给设置页：会话标签页与轨迹卡片都从宿主注入
+  // 拿到了 `sessionId`（见 ReviewCard 的 `rememberSessionId` 调用），设置页提交时声明
+  // 同一个值即可。缓存为空时原样放行，让宿主按它自己的规则拒绝（不编造）。
+  const settingsRpc: RpcCaller = async <T,>(endpoint: string, payload: unknown): Promise<RpcEnvelope<T>> => {
+    const withIdentity = payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+      ? withSessionIdentity(payload as Record<string, unknown>)
+      : payload
+    return await rpc<T>(endpoint, withIdentity)
+  }
+
   const settingsInjected = (): CrossfireSettingsInjected => ({
-    rpc,
+    rpc: settingsRpc,
     t: ctx.locale.bind(NS) as (key: string) => string,
   })
   slots.inject('settings.section', () => slots.register({

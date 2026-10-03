@@ -239,7 +239,16 @@ export async function collectDefects(input: CollectInput): Promise<CollectOutcom
   ): Promise<{ lines: Awaited<ReturnType<typeof splitByMarkers>>; usedLlm: boolean }> => {
     if (activeLlm === undefined) return { lines: splitByMarkers(item.content, allowed), usedLlm: false }
     try {
-      const lines = await splitUtterance(activeLlm, input.splitConfig, item.utterance.expertKey, item.content, allowed)
+      // 立场必须一路传到拆分器：提示词要它判断"是否打穿立场"，而此前它拿不到立场 ——
+      // 于是 strikes_stance 恒为 false。记录里的 stance 就是唯一来源，不另开参数。
+      const lines = await splitUtterance(
+        activeLlm,
+        input.splitConfig,
+        item.utterance.expertKey,
+        item.content,
+        allowed,
+        record.stance.text,
+      )
       return { lines, usedLlm: true }
     } catch {
       return { lines: splitByMarkers(item.content, allowed), usedLlm: false }

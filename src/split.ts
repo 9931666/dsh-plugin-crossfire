@@ -183,6 +183,31 @@ const TAIL_SECTION = /\[(?:核心产出|下一步建议)[^\]]*\]/
 const DIMENSION_LABEL_WORD = /^(维度|方面|角度|类别|类型)/
 
 /**
+ * 专家报告里的「针对立场」标记（`redteam.ts` 的 `reportEnvelopeSpec` 规定每条缺陷里
+ * 恰好有一行）。`未` 只允许出现在 `打穿` 之前 —— 见 {@link stanceMarkerStrikes}。
+ */
+const STANCE_MARKER = /针对\s*立场[^\n]{0,20}?[:：]\s*(未\s*)?打穿/
+
+/**
+ * 判定这段文字里专家自己写的「针对立场」结论是不是**打穿**。
+ *
+ * ## 为什么不能只写 `includes('打穿')`（这是真实存在的坑）
+ *
+ * `未打穿` 的后两个字就是 `打穿`，纯子串匹配会把"没打穿"读成"打穿了"，方向整个反过来。
+ * 所以这里匹配有界的标记（`针对立场…：打穿|未打穿`）并**显式取反**：只有 `未` 缺席时
+ * 才算打穿；标记压根不存在（含 `undefined`）也一律算没打穿。
+ *
+ * 之所以要有这个本地判定：专家的信封格式是**固定**的，报告正文里本来就写着结论。
+ * 模型拆分失败退到本地启发式（{@link splitByMarkers}）时不该把这个信号丢掉 ——
+ * 那正是"打穿立场"标签永远显示不出来的原因之一。
+ */
+export function stanceMarkerStrikes(text: string | undefined): boolean {
+  if (text === undefined) return false
+  const found = STANCE_MARKER.exec(text)
+  return found !== null && found[1] === undefined
+}
+
+/**
  * 从段首括号的文字里提取维度，并交给 `resolveDimension` 归一化。
  *
  * 上一版的兜底把括号里的圆圈数字（①）直接当成了维度名，产出 `维度②`
@@ -227,10 +252,15 @@ export function splitByMarkers(content: string, allowed: readonly string[]): Spl
     if (text === '') continue
     // 注意：维度**不再**取括号里的圆圈数字，而是从括号文字归一化得到。
     const { dimension, fallback } = dimensionOfSegmentHead(mark.head, allowed)
+    // 打穿标记（本地兜底）：只看这一段，不看整条发言 —— 否则前面某条写了「打穿」
+    // 会让后面每一条都跟着被标成打穿。标记可能落在括号里（专家把结论并进了标记行），
+    // 也可能落在正文开头（信封规定的标准位置），两处都查。
+    const strikes = stanceMarkerStrikes(mark.head) || stanceMarkerStrikes(text.slice(0, 160))
     lines.push({
       content: `观点 ${mark.label}（${mark.head}）：${text}`,
       dimension,
       ...(fallback ? { dimensionFallback: true } : {}),
+      ...(strikes ? { strikesStance: true } : {}),
       quote: undefined,
     })
   }
@@ -248,16 +278,22 @@ export async function splitUtterance(
   expertKey: string,
   content: string,
   allowed: readonly string[],
+  stance: string,
 ): Promise<SplitLine[] | null> {
   const trimmed = content.replace(/\s+/g, ' ').trim()
   if (trimmed === '') return null
-  const system = '你是 Crossfire「针锋」评审的缺陷拆分器。把下面一条红队专家发言拆成 1~3 条独立缺陷，每条缺陷只包含一个问题，不得发明原文没有的内容。dimension 必须**逐字取自给定清单 allowed 中的一项**，不得自创标签、不得输出编号；若该缺陷用「立场」中的某条理由打穿了用户的说法，把 strikes_stance 设为 true。对每条缺陷给出证据分级（C1）：代码/bug 类缺陷的 evidence.kind=repro 并写可复现步骤（1. 2. 3.）；设计类缺陷的 evidence.kind=argument 并写论证链——禁止为设计类缺陷编造"运行某命令即可复现"这类伪复现步骤。无法从原文提取证据时省略 evidence 字段。必须调用 split_crossfire_defect 工具返回结构化结果。'
+  const system = '你是 Crossfire「针锋」评审的缺陷拆分器。把下面一条红队专家发言拆成 1~3 条独立缺陷，每条缺陷只包含一个问题，不得发明原文没有的内容。dimension 必须**逐字取自给定清单 allowed 中的一项**，不得自创标签、不得输出编号；若该缺陷用「立场」中的某条理由打穿了用户的说法，把 strikes_stance 设为 true；**用户没有写立场时（下文明确标注「未填写立场」）一律不得把任何一条标成打穿**。对每条缺陷给出证据分级（C1）：代码/bug 类缺陷的 evidence.kind=repro 并写可复现步骤（1. 2. 3.）；设计类缺陷的 evidence.kind=argument 并写论证链——禁止为设计类缺陷编造"运行某命令即可复现"这类伪复现步骤。无法从原文提取证据时省略 evidence 字段。必须调用 split_crossfire_defect 工具返回结构化结果。'
   const allowedText = allowed.length > 0 ? allowed.join(' / ') : '（未限定，按通用维度判断）'
+  // 立场必须**随请求一起交给拆分器**：提示词要求它判断"是否打穿立场"，而此前它连立场
+  // 是什么都看不到 —— 于是 strikes_stance 永远是 false，"打穿立场"标签与优先排序从未生效。
+  const stanceText = stance.trim() === ''
+    ? '（未填写立场）用户这次**没有**写下立场与理由。因此不得把任何一条缺陷标成 strikes_stance=true（没有靶子就没有打穿）。'
+    : stance.trim()
   const raw = await callSplitLlm(
     llm,
     config,
     system,
-    `本次评审采用的维度清单 allowed（dimension 只能取其中之一）：${allowedText}\n\n专家 ${expertKey} 的发言：\n${trimmed}`,
+    `本次评审采用的维度清单 allowed（dimension 只能取其中之一）：${allowedText}\n\n用户在本次评审里写下的「立场与理由」：\n${stanceText}\n\n专家 ${expertKey} 的发言：\n${trimmed}`,
   )
   if (raw !== null) {
     let parsed: unknown
@@ -284,6 +320,14 @@ export async function splitUtterance(
           const candidate = obj.quote.replace(/\s+/g, ' ').trim()
           if (candidate !== '' && candidate.length <= 120 && trimmed.includes(candidate)) quote = candidate
         }
+        // 打穿标记有两处来源，任一为真即为真（只加不删）：
+        //  ① 模型读懂了立场并判定打穿；
+        //  ② **专家自己在正文里写下的结论** —— 信封格式固定在每条缺陷里写一行
+        //     `针对立场：打穿 / 未打穿`，这是比模型转述更硬的证据。专家报告了打穿、
+        //     模型却漏标时，标签不该消失（这正是"打穿立场"从未显示出来的原因之一）。
+        const strikes = obj?.strikes_stance === true
+          || stanceMarkerStrikes(line)
+          || stanceMarkerStrikes(quote)
         // 维度不再直接采信：一律归一化到 allowed 之内（越界值留下 fallback 标记）。
         const resolved = resolveDimension(obj?.dimension, allowed)
         let evidence: SplitLine['evidence']
@@ -299,7 +343,7 @@ export async function splitUtterance(
           quote,
           dimension: resolved.dimension,
           // 只有严格 true 才算打穿：模型输出 "true"/1 这类不可信值一律忽略。
-          ...(obj?.strikes_stance === true ? { strikesStance: true } : {}),
+          ...(strikes ? { strikesStance: true } : {}),
           ...(resolved.fallback ? { dimensionFallback: true } : {}),
           evidence,
         })

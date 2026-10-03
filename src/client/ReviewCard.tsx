@@ -37,6 +37,7 @@ import {
 } from './wire.ts'
 import { providerBrand, routeText } from './brand.ts'
 import { defectTitle } from './defectTitle.ts'
+import { rememberSessionId } from './session-cache.ts'
 import {
   applyPromptResult,
   togglePromptView,
@@ -79,6 +80,10 @@ export function CrossfireCard(props: Partial<CrossfireCardInjected>): ReactEleme
    * （见 rpc.ts 的 judgeActor）。
    */
   const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''
+  // 把宿主注入的**真实**身份记进浏览器侧缓存（幂等）。设置页结构上拿不到
+  // `sessionId`（见 session-cache.ts 的说明），而 `prefs.set` 要求声明身份 ——
+  // 用户只要看过「针锋」标签页或任意一次 crossfire_open 卡片，设置页就能保存了。
+  rememberSessionId(sessionId)
 
   const [reviews, setReviews] = useState<WireReview[]>([])
   const [note, setNote] = useState<string | undefined>(undefined)
@@ -620,7 +625,7 @@ function defectFoldKey(reviewId: string, defectId: string): string {
             <div className={styles.statusStrip} aria-label={t('statusStrip')}>
               <div className={styles.statusStripInfo}>
                 <div className={styles.statusStripHead}>
-                  <span className={styles.statusState}>{t(STATUS_LABEL_KEY[review.status])}</span>
+                  <span className={`${styles.statusState} ${styles[`statusState_${review.status}`] ?? ''}`}>{t(STATUS_LABEL_KEY[review.status])}</span>
                   {/* 轮次刻意不在这里重复：抬头行已经有一份（`passBadge`）。状态区
                       只放**这一态独有的**数字，重复展示等于又把信息摊平了。 */}
                   {review.status === 'judging' ? (

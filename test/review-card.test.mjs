@@ -9,11 +9,21 @@
  *     重新弹出来（反弹）。
  * B2：`defectTitle` 接受空括号信封（标题退化成无信息串），且截断不处理换行 ——
  *     而标题按钮是**折叠态唯一可见内容**，内嵌换行直接把卡片撑成多行大块。
+ *
+ * 追加的三组（同一批红队缺陷）：
+ * - C1：状态药丸此前四态恒为 brand 蓝，与抬头 badge 的四态四色冲突（同一句「攻击中」
+ *       一屏两色），因此补一条 CSS 契约断言：四个状态各有自己的 `--dsw-alias-*` 底色。
+ * - C2：`.defectTitle` 此前没有任何单行约束，80 字标题会折成 2–4 行、长英文 token 还会
+ *       横向溢出；样式无法在无 DOM 环境里跑，所以断言规则体里那四条声明仍在。
+ * - C3：`fetchReviews` 曾用 `cache: 'no-store'`，浏览器因此不存副本、`If-None-Match`
+ *       永不回传，主机侧 `etag.ts` 的 304 静默失效（每 2s 一次全量读盘 + 全量传输）。
  */
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { defectTitle } from '../src/client/defectTitle.ts'
 import { applyPromptResult, togglePromptView } from '../src/client/promptView.ts'
+import { fetchReviews, STATE_ROUTE } from '../src/client/wire.ts'
 
 // ---------------------------------------------------------------- B2：标题
 
@@ -149,4 +159,101 @@ test('A3 终态不被迟到的响应覆盖（不出现 ready ↔ error 抖动）
   const late = applyPromptResult(settled, KEY, { ok: false, message: '迟到的失败' })
   assert.equal(late, settled)
   assert.deepEqual(late[KEY], { status: 'ready', persona: 'P' })
+})
+
+// ------------------------------------------------- C1/C2：两条卡片 CSS 硬约束
+
+const CSS_PATH = new URL('../src/client/ReviewCard.module.css', import.meta.url)
+
+/**
+ * 取出一条类规则的规则体。正则要求选择器后面紧跟 `{`，所以 `.defectTitle:hover`
+ * 与注释里出现的类名都不会被误取。
+ */
+function cssBlock(selector) {
+  const css = readFileSync(CSS_PATH, 'utf8')
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+  assert.ok(match !== null, `ReviewCard.module.css 里找不到 ${selector} 规则`)
+  return match[1]
+}
+
+test('C1 状态药丸按状态取色：四个态各有自己的令牌底色（此前四态同一个蓝）', () => {
+  // judging 走缺省值：与主行动按钮同为品牌色。
+  assert.ok(cssBlock('.statusState').includes('--dsw-alias-brand-primary'),
+    'statusState 缺省底色必须是品牌色令牌（judging）')
+  const cases = [
+    ['.statusState_draft', '--dsw-alias-state-idle-primary'],
+    ['.statusState_attacking', '--dsw-alias-state-warn-primary'],
+    ['.statusState_settled', '--dsw-alias-state-success-primary'],
+  ]
+  for (const [selector, token] of cases) {
+    const block = cssBlock(selector)
+    assert.match(block, /background:/, `${selector} 必须给出底色`)
+    assert.ok(block.includes(token), `${selector} 的底色必须来自 ${token}`)
+    // 颜色只许走主题令牌：新增规则里不允许出现硬编码 hex（品牌块是唯一的例外，且不在此处）。
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(block), `${selector} 不允许硬编码 hex 颜色`)
+  }
+  // 四态底色必须两两不同，否则又回到"四态一个颜色"的老缺陷。
+  const backgrounds = ['.statusState', ...cases.map(([selector]) => selector)]
+    .map((selector) => cssBlock(selector).match(/background:\s*([^;]+);/)[1].trim())
+  assert.equal(new Set(backgrounds).size, 4, backgrounds.join(' | '))
+})
+
+test('C2 折叠态标题被钉死在单行（长标题不撑高折叠体）', () => {
+  const block = cssBlock('.defectTitle')
+  for (const declaration of [
+    'white-space: nowrap',
+    'overflow: hidden',
+    'text-overflow: ellipsis',
+    'overflow-wrap: anywhere',
+  ]) {
+    assert.ok(block.includes(declaration), `.defectTitle 缺少 ${declaration}`)
+  }
+})
+
+// ------------------------------------------------- C3：快照请求的缓存头
+
+/** 装上假 fetch 抓 init、跑完一定还原（`--test-isolation=none` 下所有用例共用一个进程）。 */
+async function withFakeFetch(run) {
+  const calls = []
+  const original = globalThis.fetch
+  globalThis.fetch = (url, init) => {
+    calls.push({ url, init })
+    return Promise.resolve({ status: 200, json: async () => ({ reviews: [] }) })
+  }
+  try {
+    const result = await run()
+    return { calls, result }
+  } finally {
+    globalThis.fetch = original
+  }
+}
+
+test('C3 fetchReviews 发 cache: no-cache —— no-store 会让 If-None-Match 永不回传', async () => {
+  const { calls, result } = await withFakeFetch(() => fetchReviews('sess-1'))
+  assert.deepEqual(result, { reviews: [] })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, `${STATE_ROUTE}?session=sess-1`)
+  assert.equal(calls[0].init.cache, 'no-cache')
+  // 本缺陷的签名：no-store 让浏览器根本不存副本 → 主机侧 etag.ts 的 304 永不发生。
+  assert.notEqual(calls[0].init.cache, 'no-store')
+})
+
+test('C3 空 session 不拼 query，AbortSignal 原样透传', async () => {
+  const controller = new AbortController()
+  const { calls } = await withFakeFetch(() => fetchReviews('', controller.signal))
+  assert.equal(calls[0].url, STATE_ROUTE)
+  assert.equal(calls[0].init.signal, controller.signal)
+})
+
+test('C3 路由不可达时返回空列表与 note（卡片宁可空着也不崩）', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = () => Promise.reject(new Error('ECONNREFUSED'))
+  try {
+    const failed = await fetchReviews('s')
+    assert.deepEqual(failed.reviews, [])
+    assert.equal(failed.note, 'ECONNREFUSED')
+  } finally {
+    globalThis.fetch = original
+  }
 })

@@ -130,7 +130,16 @@
   flex-wrap: wrap;
 }
 
-/* 态名用反色实心药丸：它与主行动按钮同色，一眼就能配对（"现在在这里 → 下一步在那里"）。 */
+/* 态名用反色实心药丸：它与主行动按钮同色，一眼就能配对（"现在在这里 → 下一步在那里"）。
+ *
+ * 底色**按状态取色**，与抬头 badge 同源（draft=idle 灰 / attacking=warn 黄 /
+ * judging=brand 蓝 / settled=success 绿）—— 此前这里恒为 brand 蓝，于是同一句
+ * 「攻击中」在抬头是黄、在状态区是蓝，药丸对四态零区分，"与主行动同色即可配对"
+ * 自然不成立。
+ *
+ * 缺省值就是 judging（品牌色，与主行动按钮同色）；其余三态由下面的修饰类覆盖背景，
+ * 文字色四态共用一个反色。四个状态名都来自调用点同一张
+ * `styles[`statusState_${review.status}`]` 查表，颜色一律走 `--dsw-alias-*` 令牌。 */
 .statusState {
   font-size: 12px;
   font-weight: 600;
@@ -138,6 +147,21 @@
   border-radius: 999px;
   background: var(--dsw-alias-brand-primary, #4a6cf7);
   color: var(--dsw-alias-bg-base, #ffffff);
+}
+
+/* draft：与 .badge_draft 同源（idle 灰）。 */
+.statusState_draft {
+  background: var(--dsw-alias-state-idle-primary, rgba(128, 128, 128, 0.85));
+}
+
+/* attacking：与 .badge_attacking 同源（warn 黄）。 */
+.statusState_attacking {
+  background: var(--dsw-alias-state-warn-primary, rgba(200, 150, 0, 0.9));
+}
+
+/* settled：与 .badge_settled 同源（success 绿）。 */
+.statusState_settled {
+  background: var(--dsw-alias-state-success-primary, rgba(46, 125, 50, 0.9));
 }
 
 .statusHint {
@@ -387,6 +411,15 @@
   background: transparent;
   color: var(--dsw-alias-label-primary, inherit);
   cursor: pointer;
+  /* 折叠态下标题是这一条**唯一可见**的内容，所以它必须永远是单行：标题由
+     `defectTitle()` 生成、硬上限 80 字符，13px 下 80 个汉字约 1040px，远超卡片列宽，
+     不约束就会折成 2–4 行，折叠体随之长回大块。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* 长英文 token（文件名 / URL）没有可断点：nowrap 下它只会被省略号吃掉，但补上
+     `anywhere` 后即使将来放宽 nowrap 也不会横向溢出。 */
+  overflow-wrap: anywhere;
 }
 
 .defectTitle:hover {

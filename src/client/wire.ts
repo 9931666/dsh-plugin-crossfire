@@ -205,8 +205,12 @@ export async function fetchReviews(
 ): Promise<WireReviewList> {
   try {
     const query = session === '' ? '' : `?session=${encodeURIComponent(session)}`
+    // `no-cache` 而不是 `no-store`：`no-store` 让浏览器**根本不存副本**，于是
+    // `If-None-Match` 永远不会被回传 —— 主机侧 `sendJsonConditional`（src/etag.ts）
+    // 的 ETag/304 优化静默失效，卡片每 2s 一次全量读盘 + 全量序列化 + 全量传输。
+    // `no-cache` 的语义仍是"每次回源校验"，但允许保存副本，304 才会发生。
     const response = await fetch(`${STATE_ROUTE}${query}`, {
-      cache: 'no-store',
+      cache: 'no-cache',
       ...(signal === undefined ? {} : { signal }),
     })
     const body = await response.json() as WireReviewList | null

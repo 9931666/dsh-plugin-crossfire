@@ -8,6 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { applyCollected, collectDefects, collectWithConcurrency, planExperts } from '../src/engine.ts'
+import { splitByMarkers, splitUtterance, stanceMarkerStrikes } from '../src/split.ts'
 import { newRecord } from '../src/review.ts'
 
 function baseRecord(overrides = {}) {
@@ -393,4 +394,177 @@ test('applyCollected：部分重复时只追加新 id，并保留先到的那条
   assert.equal(record.defects.length, 2)
   assert.equal(record.defects[0].content, '先到的内容', '同 id 保留先到的实例（它的三态是用户已做出的判断）')
   assert.equal(record.defects[0].status, 'endorsed', '已表态的实例不被后来的副本重置')
+})
+
+/* ------------------------------------------------------------------ *
+ * 「打穿立场」链路（strikesStance）
+ *
+ * 这一整段守的是一个真实缺陷：`splitUtterance` 此前**根本没有 stance 参数**，可它的
+ * 提示词却要求模型判断"是否打穿立场"——拆分器被要求判断一件它看不到的信息。实测一轮
+ * 15 条缺陷里有 3 位专家正文明确写了「针对立场：打穿」，落库的 strikesStance 却全是
+ * false，"打穿立场"标签与优先排序从未生效。
+ * ------------------------------------------------------------------ */
+
+/** 立场原文：断言它必须逐字出现在拆分请求里。 */
+const STANCE_TEXT = '我判断这个方案可以上线：① 灰度开关已经能兜住回滚；② 只在夜间发布就避开了峰值流量。'
+
+/**
+ * 会记录**收到的请求**的假 LLM（形状与 `SplitLlmLike` 一致）。
+ *
+ * `fakeStreamLlm` 只记调用次数与并发峰值，看不见消息体；这条链路的缺陷恰恰在消息体里
+ * （立场有没有随请求交给拆分器），所以需要这个变体把 `messages` / `system` 存下来。
+ */
+function recordingLlm(defects) {
+  const state = { requests: [] }
+  return {
+    state,
+    llm: {
+      stream(options) {
+        state.requests.push({
+          messages: options?.messages ?? [],
+          system: options?.system ?? '',
+        })
+        return (async function* generate() {
+          yield {
+            type: 'block-end',
+            block: { type: 'tool-call', arguments: JSON.stringify({ defects }) },
+          }
+        })()
+      },
+    },
+  }
+}
+
+/** 拼接一次请求里的 system + 全部 user 文本（断言提示词内容用）。 */
+function requestText(request) {
+  const userText = (request.messages ?? [])
+    .flatMap((message) => (message?.content ?? []).map((block) => block?.text ?? ''))
+    .join('\n')
+  return `${request.system}\n${userText}`
+}
+
+test('splitUtterance：立场原文随请求交给拆分器（提示词不再判断它看不到的信息）', async () => {
+  const { state, llm } = recordingLlm([{ content: '灰度开关只覆盖 30% 流量。', dimension: '安全' }])
+  const lines = await splitUtterance(
+    llm,
+    splitConfig,
+    '安全',
+    '观点 1（指向 A，维度安全）：灰度开关的兜底范围不足。',
+    ['安全', '性能'],
+    STANCE_TEXT,
+  )
+  assert.equal(state.requests.length, 1)
+  const seen = requestText(state.requests[0])
+  assert.ok(seen.includes(STANCE_TEXT), '立场原文必须逐字进入拆分请求')
+  assert.ok(seen.includes('立场与理由'), '请求里要有明确的「立场」段，模型才知道往哪比')
+  assert.equal(lines?.length, 1)
+  assert.equal(lines[0].dimension, '安全')
+})
+
+/** 空立场规则的中文表述（只在这里出现一次，避免测试自己抄错）。 */
+const EMPTY_STANCE_RULE = /用户没有写立场[\s\S]{0,40}一律不得把任何一条标成打穿/
+
+test('splitUtterance：立场为空时明说「未填写立场」，并要求一律不得标打穿', async () => {
+  const { state, llm } = recordingLlm([{ content: '没有靶子就不该有打穿。', dimension: '安全' }])
+  await splitUtterance(
+    llm,
+    splitConfig,
+    '安全',
+    '观点 1（指向 A，维度安全）：灰度开关的兜底范围不足。',
+    ['安全'],
+    '   ',
+  )
+  const seen = requestText(state.requests[0])
+  assert.ok(seen.includes('未填写立场'), '空立场要明示，否则模型会自己编一个靶子')
+  assert.ok(EMPTY_STANCE_RULE.test(state.requests[0].system), 'system 里要写死"没有立场时不得标打穿"')
+})
+
+test('collectDefects：立场从记录一路传到拆分请求（engine 调用点）', async () => {
+  const { state, llm } = recordingLlm([{ content: '注意：这里刻意不回写 strikes_stance。', dimension: '安全' }])
+  const record = baseRecord()
+  record.stance = { text: STANCE_TEXT, origin: 'manual', updatedAt: 1 }
+  const outcome = await collectDefects({
+    record,
+    transcript: [utterance()],
+    malformed: 0,
+    splitConfig,
+    llm,
+  })
+  assert.equal(outcome.splitAttempts, 1)
+  assert.ok(requestText(state.requests[0]).includes(STANCE_TEXT), 'record.stance.text 必须到达拆分器')
+})
+
+test('collectDefects：本地兜底识别「针对立场：打穿」（LLM 失败也不能丢这个信号）', async () => {
+  const { llm } = fakeStreamLlm({ delayMs: 1, failOn: new Set(['打穿']) })
+  const record = baseRecord()
+  record.stance = { text: STANCE_TEXT, origin: 'manual', updatedAt: 1 }
+  const outcome = await collectDefects({
+    record,
+    transcript: [utterance({
+      content: '观点 1（指向 A，维度安全）：灰度开关的兜底范围不足。 证据（argument）：前提 → 推理 → 结论。 针对立场：打穿',
+    })],
+    malformed: 0,
+    splitConfig,
+    llm,
+  })
+  assert.equal(outcome.added.length, 1)
+  assert.equal(outcome.added[0].strikesStance, true, '专家正文里写明了打穿，标签就该亮')
+})
+
+test('反例：正文写「未打穿」时不得标成打穿（"未打穿"含"打穿"三字，不能靠子串匹配）', async () => {
+  const { llm } = fakeStreamLlm({ delayMs: 1, failOn: new Set(['未打穿']) })
+  const record = baseRecord()
+  record.stance = { text: STANCE_TEXT, origin: 'manual', updatedAt: 1 }
+  const outcome = await collectDefects({
+    record,
+    transcript: [utterance({
+      content: '观点 1（指向 A，维度安全）：灰度开关的兜底范围不足。 证据（argument）：前提 → 推理 → 结论。 针对立场：未打穿',
+    })],
+    malformed: 0,
+    splitConfig,
+    llm,
+  })
+  assert.equal(outcome.added.length, 1)
+  assert.notEqual(outcome.added[0].strikesStance, true, '方向整个反过来就是这条断言要防的事')
+  assert.equal(stanceMarkerStrikes('针对立场：未打穿'), false)
+  assert.equal(stanceMarkerStrikes('针对立场：打穿'), true)
+  assert.equal(stanceMarkerStrikes('针对立场：未 打穿'), false)
+  assert.equal(stanceMarkerStrikes('这里只是提到打穿两个字，没有标记'), false)
+})
+
+test('本地兜底：只标写明了打穿的那一条，不把结论漏给后面每一条', async () => {
+  const content = '观点 1（指向 A，维度安全）：第一条缺陷正文。 针对立场：打穿'
+    + ' 观点 2（指向 B，维度安全）：第二条缺陷正文。 针对立场：未打穿'
+  const lines = splitByMarkers(content, ['安全'])
+  assert.equal(lines?.length, 2)
+  assert.equal(lines[0].strikesStance, true)
+  assert.equal(lines[1].strikesStance, undefined, '同一段发言里"打穿"不得外溢到下一条')
+})
+
+test('splitUtterance：LLM 结果漏标打穿时，专家正文里写明的结论仍然生效（只加不删）', async () => {
+  // 防御性断言：专家报告里的 `针对立场：` 是比模型转述更硬的证据（信封格式固定）。
+  // 模型漏标时只**补**成 true；模型自己标 true 的路径不受影响。
+  const { llm } = recordingLlm([{ content: '缺陷正文。 针对立场：打穿', dimension: '安全' }])
+  const lines = await splitUtterance(
+    llm,
+    splitConfig,
+    '安全',
+    '观点 1（指向 A，维度安全）：缺陷正文。 针对立场：打穿',
+    ['安全'],
+    STANCE_TEXT,
+  )
+  assert.equal(lines?.[0].strikesStance, true)
+})
+
+test('splitUtterance：模型标了打穿就照收（专家标记缺席也不许被本地判否覆盖）', async () => {
+  const { llm } = recordingLlm([{ content: '缺陷正文（专家没写立场结论）。', dimension: '安全', strikes_stance: true }])
+  const lines = await splitUtterance(
+    llm,
+    splitConfig,
+    '安全',
+    '观点 1（指向 A，维度安全）：缺陷正文（专家没写立场结论）。',
+    ['安全'],
+    STANCE_TEXT,
+  )
+  assert.equal(lines?.[0].strikesStance, true)
 })
