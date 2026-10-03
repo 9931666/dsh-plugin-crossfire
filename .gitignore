@@ -30,3 +30,4 @@ Desktop.ini
 
 # 提交信息临时文件（用它避开 PowerShell 的引号解析）。
 .commit-msg.txt
+HANDOVER-NEXT.md
