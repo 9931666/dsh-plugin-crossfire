@@ -1,0 +1,12 @@
+﻿fix(export): 同时导出 .txt(UTF-8 带 BOM),记事本可直开
+
+用户反馈"导出来的产物我无法用记事本查看"。核查发现导出文件本身没坏(UTF-8 无 BOM、
+内容正常),问题是两件事:扩展名 .md 在 Windows 上常被别的程序抢走,而无 BOM 的 UTF-8
+会被记事本误判成 ANSI。所以额外写一份人读副本。
+
+- state: 新增 writeTextAtomicWithBom(只加 BOM,不改其他)
+- review: 新增 exportTextFile(<reviewDir>/export.txt)
+- rpc/tools: 两个导出点都写 .md(无 BOM,给渲染器)+ .txt(带 BOM,给记事本);
+  副本写不成不影响主产物
+- client: 下载改为 .txt,提示里列出两份路径
+- 门禁:双绿 + 155/155 单测

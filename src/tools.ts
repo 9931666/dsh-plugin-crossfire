@@ -35,6 +35,7 @@ import {
   buildRecheckItems,
   countDefects,
   exportFile,
+  exportTextFile,
   knownFlaws,
   mutateRecord,
   newRecord,
@@ -617,9 +618,17 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
 
       const markdown = renderReviewMarkdown(record, countDefects(record))
       const path = exportFile(stateRoot, reviewId)
-      const { writeTextAtomic } = await import('./state.ts')
+      const { writeTextAtomic, writeTextAtomicWithBom } = await import('./state.ts')
       await writeTextAtomic(path, markdown)
-      return { path, bytes: Buffer.byteLength(markdown, 'utf8'), markdown }
+      // 人读副本：`.txt` + UTF-8 BOM（记事本可直开；见 review.ts 的 exportTextFile）。
+      let textPath = ''
+      try {
+        textPath = exportTextFile(stateRoot, reviewId)
+        await writeTextAtomicWithBom(textPath, markdown)
+      } catch {
+        // 副本写不成不影响导出本身。
+      }
+      return { path, textPath, bytes: Buffer.byteLength(markdown, 'utf8'), markdown }
     },
   }))
 

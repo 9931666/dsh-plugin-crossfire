@@ -74,6 +74,17 @@ export function exportFile(stateRoot: string, reviewId: string): string {
   return join(reviewDirOf(stateRoot, reviewId), 'export.md')
 }
 
+/**
+ * `<reviewDir>/export.txt` —— 同一份内容的**人读副本**（UTF-8 带 BOM）。
+ *
+ * 为什么导出两份：`.md` 交给 Markdown 渲染器，但 Windows 上双击 `.md` 常被别的程序
+ * 抢走，加上无 BOM 的 UTF-8 会被记事本误判成 ANSI —— 于是"导出物打不开"。`.txt` 带
+ * BOM 后双击直接进记事本，中文也不乱码（用户反馈的正是这一点）。
+ */
+export function exportTextFile(stateRoot: string, reviewId: string): string {
+  return join(reviewDirOf(stateRoot, reviewId), 'export.txt')
+}
+
 /** `<stateRoot>/crossfire`（诊断用）。 */
 export function namespaceRoot(stateRoot: string): string {
   return crossfireRootOf(stateRoot)

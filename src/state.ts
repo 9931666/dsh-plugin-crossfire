@@ -118,6 +118,19 @@ export async function writeTextAtomic(file: string, text: string): Promise<void>
   await rename(tmp, file)
 }
 
+/**
+ * 原子写一份**带 UTF-8 BOM** 的文本，供人用记事本直接打开。
+ *
+ * 为什么单独一个函数：Windows 记事本对"无 BOM 的 UTF-8"时常误判成 ANSI，中文变乱码。
+ * 而 `.md` 扩展名在不少机器上被别的程序抢走，双击进不了记事本。所以导出时额外写一份
+ * `.txt`（带 BOM）—— 用户反馈"导出来的产物我无法用记事本查看"就是这个原因。
+ *
+ * BOM 只加在这份人读副本上：`.md` 保持无 BOM，交给 Markdown 渲染器更干净。
+ */
+export async function writeTextAtomicWithBom(file: string, text: string): Promise<void> {
+  await writeTextAtomic(file, `\uFEFF${text}`)
+}
+
 /** Atomically publish a JSON file (same-directory tmp + rename). */
 export async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   await writeTextAtomic(file, JSON.stringify(value, null, 2))

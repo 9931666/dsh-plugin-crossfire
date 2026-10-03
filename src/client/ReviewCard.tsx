@@ -382,10 +382,10 @@ export function CrossfireCard(props: Partial<CrossfireCardInjected>): ReactEleme
     })))
   }
 
-  /** 导出为 Markdown 并触发下载（文件同时已落盘到评审目录）。 */
+  /** 导出为 Markdown 并触发下载（盘上同时落 `export.md` 与带 BOM 的 `export.txt`）。 */
   const exportReview = async (review: WireReview): Promise<void> => {
     setBusy(true)
-    const result = await rpc<{ path: string; markdown: string }>('crossfire/review.export', {
+    const result = await rpc<{ path: string; textPath?: string; markdown: string }>('crossfire/review.export', {
       reviewId: review.reviewId,
       stateRoot: review.stateRoot,
       // 会话 id 必须随每次 RPC 一起送进 host：它既是归属校验的依据，也是
@@ -401,13 +401,19 @@ export function CrossfireCard(props: Partial<CrossfireCardInjected>): ReactEleme
     // 导出成功是"成功"，不该用错误通道渲染成红色（红队抓出的缺陷：成功与失败共用
     // 同一个 notice 位置与同一套错误色）。位置不变（状态区、离 footer 的导出按钮
     // 最近），只把颜色语义改对。
-    reportOk(`${t('exportDone')}：${result.value.path}`)
+    //
+    // 提示里明确列出**两份产物**：`.md` 给渲染器，`.txt`（UTF-8 带 BOM）给记事本
+    // —— 用户反馈的正是"导出来的产物我无法用记事本查看"。
+    reportOk(result.value.textPath === undefined || result.value.textPath === ''
+      ? `${t('exportDone')}：${result.value.path}`
+      : `${t('exportDone')}：${result.value.path} ＋ ${result.value.textPath}`)
     try {
-      const blob = new Blob([result.value.markdown], { type: 'text/markdown;charset=utf-8' })
+      // 下载 `.txt` 那一份：它带 BOM、扩展名是 .txt，双击就能进记事本。
+      const blob = new Blob([result.value.markdown], { type: 'text/plain;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `${review.reviewId}.md`
+      anchor.download = `${review.reviewId}.txt`
       anchor.click()
       URL.revokeObjectURL(url)
     } catch {

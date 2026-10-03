@@ -36,6 +36,7 @@ import {
   buildRecheckItems,
   countDefects,
   exportFile,
+  exportTextFile,
   mutateRecord,
   newRecord,
   readRecord,
@@ -54,6 +55,7 @@ import {
   stateRootOf,
   withCrossfireLock,
   writeTextAtomic,
+  writeTextAtomicWithBom,
 } from './state.ts'
 import { DIMENSION_POOL, INTENSITY_SPECS, type CrossfireRecord, type Intensity } from './types.ts'
 import { workspaceRegistryOf } from './harness-compat.ts'
@@ -562,7 +564,16 @@ export function registerRpc(ctx: Context, runtime: CrossfireRuntime): RpcDispatc
           const markdown = renderReviewMarkdown(located.record, countDefects(located.record))
           const path = exportFile(located.stateRoot, reviewId)
           await writeTextAtomic(path, markdown)
-          return ok({ path, bytes: Buffer.byteLength(markdown, 'utf8'), markdown })
+          // 人读副本：`.txt` + UTF-8 BOM，双击直接进记事本（.md 常被别的程序抢走）。
+          let textPath: string
+          try {
+            textPath = exportTextFile(located.stateRoot, reviewId)
+            await writeTextAtomicWithBom(textPath, markdown)
+          } catch {
+            // 副本写不成不影响导出本身：`.md` 已经在盘上了。
+            textPath = ''
+          }
+          return ok({ path, textPath, bytes: Buffer.byteLength(markdown, 'utf8'), markdown })
         }
 
         /* ---------------- O1 直推：推进状态机 ---------------- */
