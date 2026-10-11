@@ -29,7 +29,8 @@ import { fetchReviews, STATE_ROUTE } from '../src/client/wire.ts'
 
 test('B2 正常信封仍取前缀（编号 + 定位 + 维度），不受空括号判据影响', () => {
   const content = '观点 1（指向 src/x.ts:10，维度 安全）：这里有个洞'
-  assert.equal(defectTitle(content), '观点 1（指向 src/x.ts:10，维度 安全）')
+  // 原标题压缩：完整路径留在正文，标题只取 文件名:行号 + 维度（见下方"标题压缩"用例组）。
+  assert.equal(defectTitle(content), '观点 1 · x.ts:10 · 安全')
   // 半角括号 + 冒号同义，且多余空白被裁掉。
   assert.equal(defectTitle('观点 2 (指向 y)：正文'), '观点 2 (指向 y)')
   assert.equal(defectTitle('  观点 3（维度 性能）：正文  '), '观点 3（维度 性能）')
@@ -93,6 +94,48 @@ test('B2 非信封内容回退首句；空输入不抛错也不返回 undefined'
     assert.equal(typeof defectTitle(empty), 'string', JSON.stringify(empty))
     assert.equal(defectTitle(empty), '')
   }
+})
+
+// ------------------------------------------------- 标题压缩（用户实测反馈）
+
+/**
+ * 用户反馈的原始现象：折叠态标题**过长导致后面显示不全**，而且"有很多无用信息，
+ * 比如路径的位置"。
+ *
+ * 根因不在提示词、也不在红队：红队写完整路径是**对的**（审计要能定位到文件），
+ * 问题在于 `defectTitle()` 把整个信封前缀原样当标题返回。现在标题压缩成
+ * `观点 N · 文件名:行号 · 维度`，完整路径仍留在缺陷正文里可追溯。
+ */
+test('标题压缩：完整路径只留在正文，标题只取文件名+行号+维度', () => {
+  const content = '观点 2（指向 dsh-plugin-crossfire/src/client/ReviewCard.module.css:106-176，维度 交互）：药丸与主行动按钮并不"同色配对"……'
+  assert.equal(defectTitle(content), '观点 2 · ReviewCard.module.css:106-176 · 交互')
+})
+
+test('标题压缩：Windows 反斜杠路径同样压成文件名（且不以路径开头）', () => {
+  const title = defectTitle('观点 1（指向 dsh-plugin-crossfire\\src\\client\\wire.ts:205-215，维度 性能）：每 2 秒全量重拉')
+  assert.equal(title, '观点 1 · wire.ts:205-215 · 性能')
+  assert.ok(!title.includes('dsh-plugin-crossfire'), '标题里不应再出现仓库路径')
+})
+
+test('标题压缩：普通相对路径与裸文件名都成立', () => {
+  assert.equal(defectTitle('观点 3（指向 src/a.ts:10，维度 安全）：x'), '观点 3 · a.ts:10 · 安全')
+  assert.equal(defectTitle('观点 4（指向 README.md，维度 流程）：y'), '观点 4 · README.md · 流程')
+})
+
+test('标题压缩：形状不认识时退回原始前缀，绝不硬拼残缺标题', () => {
+  // 括号里没有 `指向 / 维度` 的旧格式：原样返回，不猜。
+  assert.equal(defectTitle('观点 2 (指向 y)：正文'), '观点 2 (指向 y)')
+  assert.equal(defectTitle('观点 3（维度 性能）：正文'), '观点 3（维度 性能）')
+  // 有 `指向` 但缺 `维度`：同样退回原始前缀。
+  assert.equal(defectTitle('观点 5（指向 src/b.ts:1）：z'), '观点 5（指向 src/b.ts:1）')
+})
+
+test('标题压缩：结果必须显著短于原始长信封（这是用户要解决的问题）', () => {
+  const long = '观点 1（指向 dsh-plugin-crossfire/src/client/ReviewCard.module.css:1479-1564 与 RoundTableView.tsx:1747-1811，维度 兼容）：圆桌的三个表态按钮颜色映射与文字语义相反……'
+  const title = defectTitle(long)
+  assert.ok(title.length < long.length, '压缩后必须更短')
+  assert.ok(title.length <= 80, `压缩后仍须受 ${80} 字上限约束，实际 ${title.length}`)
+  assert.ok(!title.includes('dsh-plugin-crossfire/'), '标题里不再出现长路径')
 })
 
 // ------------------------------------------------- A3：原提示词展开状态机
