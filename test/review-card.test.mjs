@@ -31,9 +31,10 @@ test('B2 正常信封仍取前缀（编号 + 定位 + 维度），不受空括�
   const content = '观点 1（指向 src/x.ts:10，维度 安全）：这里有个洞'
   // 原标题压缩：完整路径留在正文，标题只取 文件名:行号 + 维度（见下方"标题压缩"用例组）。
   assert.equal(defectTitle(content), '观点 1 · x.ts:10 · 安全')
-  // 半角括号 + 冒号同义，且多余空白被裁掉。
-  assert.equal(defectTitle('观点 2 (指向 y)：正文'), '观点 2 (指向 y)')
-  assert.equal(defectTitle('  观点 3（维度 性能）：正文  '), '观点 3（维度 性能）')
+  // 半角括号 + 冒号同义，且多余空白被裁掉。压缩不出"指向+维度"时退成
+  // `观点 N · 信封后的首句`（定位串只留在正文）。
+  assert.equal(defectTitle('观点 2 (指向 y)：正文'), '观点 2 · 正文')
+  assert.equal(defectTitle('  观点 3（维度 性能）：正文  '), '观点 3 · 正文')
 })
 
 test('B2 空括号信封不算命中，回退首句（不再返回无信息串）', () => {
@@ -60,9 +61,10 @@ test('B2 短文本的空括号信封不再被当成合法信封（判据严格�
     assert.equal(title, content, content)
     assert.ok(!title.endsWith('…'), content)
   }
-  // 合法短信封仍然命中（不能把严格判据做得过头）。
-  assert.equal(defectTitle('观点1（维度安全）'), '观点1（维度安全）')
-  assert.equal(defectTitle('观点 1 (x)'), '观点 1 (x)')
+  // 合法短信封仍然命中（不能把严格判据做得过头），只是格式统一成
+  // `观点 N · 维度` / `观点 N`，不再原样返回括号串。
+  assert.equal(defectTitle('观点1（维度安全）'), '观点 1 · 安全')
+  assert.equal(defectTitle('观点 1 (x)'), '观点 1')
 })
 
 test('B2 含换行的长首段标题不含换行（折叠态标题必须是一行）', () => {
@@ -122,12 +124,12 @@ test('标题压缩：普通相对路径与裸文件名都成立', () => {
   assert.equal(defectTitle('观点 4（指向 README.md，维度 流程）：y'), '观点 4 · README.md · 流程')
 })
 
-test('标题压缩：形状不认识时退回原始前缀，绝不硬拼残缺标题', () => {
-  // 括号里没有 `指向 / 维度` 的旧格式：原样返回，不猜。
-  assert.equal(defectTitle('观点 2 (指向 y)：正文'), '观点 2 (指向 y)')
-  assert.equal(defectTitle('观点 3（维度 性能）：正文'), '观点 3（维度 性能）')
-  // 有 `指向` 但缺 `维度`：同样退回原始前缀。
-  assert.equal(defectTitle('观点 5（指向 src/b.ts:1）：z'), '观点 5（指向 src/b.ts:1）')
+test('标题压缩：形状不认识时退成「观点 N · 首句」，绝不把长定位串塞进标题', () => {
+  // 括号里没有 `指向 / 维度` 的旧格式：保留编号，取信封后的首句，不猜定位。
+  assert.equal(defectTitle('观点 2 (指向 y)：正文'), '观点 2 · 正文')
+  assert.equal(defectTitle('观点 3（维度 性能）：正文'), '观点 3 · 正文')
+  // 有 `指向` 但缺 `维度`：同样退成编号 + 首句，路径只留在正文。
+  assert.equal(defectTitle('观点 5（指向 src/b.ts:1）：z'), '观点 5 · z')
 })
 
 test('标题压缩：结果必须显著短于原始长信封（这是用户要解决的问题）', () => {

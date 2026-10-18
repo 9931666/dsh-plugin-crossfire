@@ -9,13 +9,43 @@
  * 令牌已经由宿主按主题解析过，直接用才是正确的做法。
  */
 
+/* ---- 本地设计令牌（这一批改动的全部依据） ----
+ *
+ * 字号四档、圆角三档、间距 4px 栅格。圆桌设置页有同值的一份：
+ * CSS Module 的 classMap 按模块生成，跨包无法共享类名，只能共享**数值**。
+ * 这两份文件是同一套规格的两个副本 —— 改一处时另一处必须同步，否则两个
+ * 插件的设置页会重新分叉。
+ */
 .root {
+  --cf-fs-11: 11px;
+  --cf-fs-12: 12px;
+  --cf-fs-13: 13px;
+  --cf-fs-14: 14px;
+  --cf-radius-s: 6px;
+  --cf-radius-m: 8px;
+  --cf-radius-l: 12px;
+  --cf-space-1: 4px;
+  --cf-space-2: 8px;
+  --cf-space-3: 12px;
+  --cf-space-4: 16px;
+  --cf-control-h: 32px;
+  --cf-border: var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
+  --cf-border-strong: var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  --cf-bg-soft: var(--dsw-alias-bg-layer-2, transparent);
+  --cf-bg-card: var(--dsw-alias-bg-layer-1, transparent);
+  --cf-fg: var(--dsw-alias-label-primary, inherit);
+  --cf-fg-2: var(--dsw-alias-label-secondary, inherit);
+  --cf-brand: var(--dsw-alias-brand-primary, #4a6cf7);
+  --cf-on-brand: var(--dsw-alias-bg-base, #ffffff);
+
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  max-width: 620px;
+  gap: var(--cf-space-4);
+  max-width: 720px;
   padding: 8px 0;
-  color: var(--dsw-alias-label-primary, inherit);
+  color: var(--cf-fg);
+  font-size: var(--cf-fs-13);
+  line-height: 1.6;
 }
 
 .notice {
@@ -31,15 +61,39 @@
   color: var(--dsw-alias-state-error-primary, #d9534f);
 }
 
+/* 每个区块是一张卡片：边框 + 圆角 + 浅底把"一组设置"圈起来。
+ * 之前所有区块靠 20px 空隙分隔，长页面滚到一半就分不清哪些控件属于同一组。 */
 .section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--cf-space-3);
+  padding: var(--cf-space-4);
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius-l);
+  background: var(--cf-bg-card);
+}
+
+/* 第一个区块是整页标题 + 导语，不做卡片：给它加边框会变成"一个框里的标题"。 */
+.root > .section:first-child {
+  padding: 0 2px var(--cf-space-1);
+  border: none;
+  background: transparent;
+  gap: var(--cf-space-1);
 }
 
 .sectionTitle {
-  font-size: 14px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--cf-fs-14);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+/* 图标降一档饱和度：它是"目录"记号，不和文字抢。 */
+.sectionTitle svg {
+  flex: none;
+  color: var(--cf-fg-2);
 }
 
 /* 区块抬头行：标题在左，"新建"这类**区块主操作**在右。
@@ -65,14 +119,20 @@
 /* ---- 区块主操作（品牌色实心） ---- */
 
 .primaryButton {
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: var(--cf-control-h);
+  font-size: var(--cf-fs-13);
   font-weight: 600;
   padding: 6px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-brand-primary, #4a6cf7);
-  background: var(--dsw-alias-brand-primary, #4a6cf7);
-  color: var(--dsw-alias-bg-base, #ffffff);
+  border-radius: var(--cf-radius-m);
+  border: 1px solid var(--cf-brand);
+  background: var(--cf-brand);
+  color: var(--cf-on-brand);
   cursor: pointer;
+}
+
+.primaryButton:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 
 .primaryButton:disabled {
@@ -131,13 +191,16 @@
 
 .input,
 .select {
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: var(--cf-control-h);
+  width: 100%;
+  max-width: 320px;
+  font-size: var(--cf-fs-13);
   padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  color: var(--dsw-alias-label-primary, inherit);
-  max-width: 260px;
+  border-radius: var(--cf-radius-m);
+  border: 1px solid var(--cf-border-strong);
+  background: var(--cf-bg-soft);
+  color: var(--cf-fg);
 }
 
 .input:focus,
@@ -150,29 +213,34 @@
 
 .segmented {
   display: inline-flex;
-  gap: 0;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  border-radius: 8px;
-  overflow: hidden;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--cf-border);
+  border-radius: var(--cf-radius-l);
+  background: var(--cf-bg-soft);
   width: fit-content;
 }
 
 .segment {
-  font-size: 13px;
-  padding: 6px 14px;
+  box-sizing: border-box;
+  min-height: 28px;
+  font-size: var(--cf-fs-13);
+  padding: 5px 14px;
   border: none;
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  color: var(--dsw-alias-label-primary, inherit);
+  border-radius: var(--cf-radius-m);
+  background: transparent;
+  color: var(--cf-fg);
   cursor: pointer;
 }
 
+/* 组内不再画分隔线：间隙 + 圆角已经能把两段分开，再加竖线会显得像表格。 */
 .segment + .segment {
-  border-left: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
+  border-left: none;
 }
 
 .segmentActive {
-  background: var(--dsw-alias-brand-primary, #4a6cf7);
-  color: var(--dsw-alias-bg-base, #ffffff);
+  background: var(--cf-brand);
+  color: var(--cf-on-brand);
   font-weight: 600;
 }
 
@@ -186,16 +254,20 @@
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--cf-space-2);
 }
 
 .chip {
-  font-size: 12px;
-  padding: 3px 10px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  font-size: var(--cf-fs-12);
+  padding: 2px 10px;
   border-radius: 999px;
-  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
-  background: var(--dsw-alias-bg-layer-2, transparent);
-  color: var(--dsw-alias-label-secondary, inherit);
+  border: 1px solid var(--cf-border);
+  background: var(--cf-bg-soft);
+  color: var(--cf-fg-2);
 }
 
 /* 带品牌块的成员 chip：左边品牌色块，右边成员 key。 */
@@ -258,13 +330,19 @@
 }
 
 .addButton {
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: var(--cf-control-h);
+  font-size: var(--cf-fs-13);
   padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  color: var(--dsw-alias-label-primary, inherit);
+  border-radius: var(--cf-radius-m);
+  border: 1px solid var(--cf-border-strong);
+  background: transparent;
+  color: var(--cf-fg);
   cursor: pointer;
+}
+
+.addButton:hover:not(:disabled) {
+  background: var(--cf-bg-soft);
 }
 
 .addButton:disabled {
@@ -277,58 +355,62 @@
 .boundary {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
-  background: var(--dsw-alias-bg-layer-2, transparent);
-  font-size: 12px;
+  gap: var(--cf-space-2);
+  padding: 14px 16px;
+  border-radius: var(--cf-radius-l);
+  border: 1px solid var(--cf-border);
+  background: var(--cf-bg-soft);
+  font-size: var(--cf-fs-12);
   line-height: 1.7;
-  color: var(--dsw-alias-label-secondary, inherit);
+  color: var(--cf-fg-2);
 }
 
 .boundaryTitle {
-  font-size: 13px;
+  font-size: var(--cf-fs-13);
   font-weight: 600;
-  color: var(--dsw-alias-label-primary, inherit);
+  color: var(--cf-fg);
 }
 
 .batchNote {
-  font-size: 12px;
+  font-size: var(--cf-fs-12);
   line-height: 1.6;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--cf-radius-m);
   border: 1px solid var(--dsw-alias-state-warn-primary, rgba(200, 150, 0, 0.5));
-  color: var(--dsw-alias-label-secondary, inherit);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #c89600) 8%, transparent);
+  color: var(--cf-fg-2);
 }
 
 /* ------------------------------------------------------------------ *
  * 角色预设 / 阵容预设（后补的类，颜色同样只用主题令牌）
  * ------------------------------------------------------------------ */
 
-/* 比 .input / .select 的 260px 宽一些：角色说明与模型名更长。 */
+/* 比 .input / .select 的 320px 宽一些：角色说明与模型名更长。 */
 .inputWide {
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: var(--cf-control-h);
+  font-size: var(--cf-fs-13);
   padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  color: var(--dsw-alias-label-primary, inherit);
+  border-radius: var(--cf-radius-m);
+  border: 1px solid var(--cf-border-strong);
+  background: var(--cf-bg-soft);
+  color: var(--cf-fg);
   width: 100%;
-  max-width: 420px;
+  max-width: 480px;
 }
 
 .textarea {
-  font-size: 13px;
+  box-sizing: border-box;
+  font-size: var(--cf-fs-13);
   font-family: inherit;
   line-height: 1.5;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  color: var(--dsw-alias-label-primary, inherit);
+  padding: 8px 10px;
+  border-radius: var(--cf-radius-m);
+  border: 1px solid var(--cf-border-strong);
+  background: var(--cf-bg-soft);
+  color: var(--cf-fg);
   width: 100%;
-  max-width: 420px;
+  max-width: 480px;
   resize: vertical;
 }
 
@@ -349,11 +431,11 @@
 .listRow {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
-  background: var(--dsw-alias-bg-layer-2, transparent);
+  gap: var(--cf-space-1);
+  padding: 10px 12px;
+  border-radius: var(--cf-radius-m);
+  border: 1px solid var(--cf-border);
+  background: var(--cf-bg-soft);
 }
 
 .rowHead {
@@ -381,23 +463,35 @@
 }
 
 .rowButton {
-  font-size: 12px;
+  box-sizing: border-box;
+  min-height: 28px;
+  font-size: var(--cf-fs-12);
   padding: 3px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  background: var(--dsw-alias-bg-layer-1, transparent);
-  color: var(--dsw-alias-label-primary, inherit);
+  border-radius: var(--cf-radius-s);
+  border: 1px solid var(--cf-border-strong);
+  background: transparent;
+  color: var(--cf-fg);
   cursor: pointer;
 }
 
+.rowButton:hover:not(:disabled) {
+  background: var(--cf-bg-soft);
+}
+
 .rowDanger {
-  font-size: 12px;
+  box-sizing: border-box;
+  min-height: 28px;
+  font-size: var(--cf-fs-12);
   padding: 3px 10px;
-  border-radius: 6px;
+  border-radius: var(--cf-radius-s);
   border: 1px solid var(--dsw-alias-state-error-primary, #d9534f);
   background: transparent;
   color: var(--dsw-alias-state-error-primary, #d9534f);
   cursor: pointer;
+}
+
+.rowDanger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d9534f) 7%, transparent);
 }
 
 .rowButton:disabled,
@@ -412,11 +506,11 @@
 .editor {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  background: var(--dsw-alias-bg-overlay, var(--dsw-alias-bg-layer-1, transparent));
+  gap: var(--cf-space-3);
+  padding: 14px;
+  border-radius: var(--cf-radius-l);
+  border: 1px solid var(--cf-border-strong);
+  background: var(--cf-bg-soft);
 }
 
 .gridTwo {
@@ -430,12 +524,12 @@
 .member {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: var(--cf-space-2);
   flex-wrap: wrap;
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.3));
-  background: var(--dsw-alias-bg-layer-2, transparent);
+  padding: 10px;
+  border-radius: var(--cf-radius-l);
+  border: 1px solid var(--cf-border);
+  background: var(--cf-bg-soft);
 }
 
 .memberFields {

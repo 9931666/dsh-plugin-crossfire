@@ -38,6 +38,7 @@ import type {
 } from './wire.ts'
 import { mergePreset, mergeSquad } from './merge.ts'
 import { providerBrand, routeAbbr, routeText } from './brand.ts'
+import { InlineIcon } from './icons.tsx'
 import styles from './SettingsView.module.css'
 
 /* ------------------------------------------------------------------ *
@@ -577,7 +578,7 @@ export function CrossfireSettings(props: CrossfireSettingsInjected): ReactElemen
 
       {/* ---------------- 维度池 ---------------- */}
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>{t('dimensionsTitle')}</div>
+        <div className={styles.sectionTitle}><InlineIcon name="layers" />{t('dimensionsTitle')}</div>
         <div className={styles.hint}>{t('dimensionsHint')}</div>
 
         <div className={styles.label}>{t('poolLabel')}</div>
@@ -648,7 +649,7 @@ export function CrossfireSettings(props: CrossfireSettingsInjected): ReactElemen
 
       {/* ---------------- 预算（数字字段：失焦提交） ---------------- */}
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>{t('budgetTitle')}</div>
+        <div className={styles.sectionTitle}><InlineIcon name="gauge" />{t('budgetTitle')}</div>
         <div className={styles.hint}>{t('budgetHint')}</div>
         {NUMERIC_FIELDS.map((field) => (
           <div className={styles.field} key={field.key}>
@@ -674,7 +675,7 @@ export function CrossfireSettings(props: CrossfireSettingsInjected): ReactElemen
             用户实测反馈"＋ 新建预设"不够显眼 —— 它此前和次要的"编辑/删除"同级、
             并淹没在列表下方。现在它是本区唯一的实心按钮，且位置固定不随列表长度漂移。 */}
         <div className={styles.sectionHead}>
-          <div className={styles.sectionTitle}>{t('settingsPresetsTitle')}</div>
+          <div className={styles.sectionTitle}><InlineIcon name="role" />{t('settingsPresetsTitle')}</div>
           <span className={styles.sectionHeadGap} />
           <button
             type="button"
@@ -850,7 +851,7 @@ export function CrossfireSettings(props: CrossfireSettingsInjected): ReactElemen
       <div className={styles.section}>
         {/* 与角色预设同一套层级：标题在左、新建在右、且是唯一实心按钮。 */}
         <div className={styles.sectionHead}>
-          <div className={styles.sectionTitle}>{t('settingsSquadsTitle')}</div>
+          <div className={styles.sectionTitle}><InlineIcon name="squad" />{t('settingsSquadsTitle')}</div>
           <span className={styles.sectionHeadGap} />
           <button
             type="button"

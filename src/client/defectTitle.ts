@@ -64,7 +64,22 @@ export function defectTitle(content: string): string {
   if (envelope !== null && envelope[1] !== undefined) {
     const raw = envelope[1].trim()
     const compact = compactEnvelope(raw)
-    return take(compact ?? raw, TITLE_MAX)
+    if (compact !== undefined) return take(compact, TITLE_MAX)
+    // 信封形状不认识（缺"维度"、指向里带嵌套括号导致截断等）：**不再把原始前缀
+    // 原样当标题返回**——那正是"标题里全是长路径"的来源。退成 `观点 N · 首句`，
+    // 完整定位串仍留在缺陷正文里可追溯。
+    const index = /观点\s*(\d+)/.exec(raw)?.[1]
+    const tail = text.slice(envelope[0].length).replace(/^[\s:：]+/, '')
+    const firstLine = (tail.split(/\r?\n/)[0] ?? tail).trim()
+    const firstSentence = (firstLine.split(/(?<=[。．.；;！!？?])/)[0] ?? firstLine).trim()
+    if (index !== undefined && firstSentence !== '') return take(`观点 ${index} · ${firstSentence}`, TITLE_MAX)
+    if (index !== undefined) {
+      // 没有正文可摘时才退回维度（例如 `观点1（维度安全）` 这类短信封）。
+      const dimension = /维度\s*([^）)]*)/.exec(raw)?.[1]?.trim()
+      if (dimension !== undefined && dimension !== '') return take(`观点 ${index} · ${dimension}`, TITLE_MAX)
+      return `观点 ${index}`
+    }
+    return take(raw, TITLE_MAX)
   }
   // 逐句切：先按换行取首段（标题必须是一行 —— 内嵌换行会把折叠态撑成多行大块），
   // 再按句末标点取首句。

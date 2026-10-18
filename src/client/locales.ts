@@ -83,6 +83,7 @@ export type CrossfireKey =
   | 'countEndorsed'
   | 'countRejected'
   | 'countPending'
+  | 'countPendingOfTotal'
   | 'defectEmpty'
   | 'defectsTitle'
   | 'evidenceRepro'
@@ -275,6 +276,7 @@ export const zh: Record<CrossfireKey, string> = {
   countEndorsed: '认定',
   countRejected: '驳回',
   countPending: '待定',
+  countPendingOfTotal: '待定 {pending} / 共 {total} 条',
   defectEmpty: '还没有可裁决的缺陷。',
   defectsTitle: '待裁决缺陷',
   evidenceRepro: '可复现步骤',
@@ -464,6 +466,7 @@ export const en: Record<CrossfireKey, string> = {
   countEndorsed: 'Endorsed',
   countRejected: 'Rejected',
   countPending: 'Pending',
+  countPendingOfTotal: 'Pending {pending} / {total} total',
   defectEmpty: 'No defects to adjudicate yet.',
   defectsTitle: 'Defects to adjudicate',
   evidenceRepro: 'Repro steps',

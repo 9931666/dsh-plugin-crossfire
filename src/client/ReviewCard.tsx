@@ -630,8 +630,12 @@ function defectFoldKey(reviewId: string, defectId: string): string {
                       只放**这一态独有的**数字，重复展示等于又把信息摊平了。 */}
                   {review.status === 'judging' ? (
                     // 待裁决时最该看到的不是总数，而是"还剩几条等我表态"。
+                    // 用 `待定 N / 共 M 条` 而不是 `待定 N / 表态 M`：药丸已经说过
+                    // 「待裁决」，再来一个「表态」是同一件事的两种说法。
                     <span className={styles.muted}>
-                      {`${t('countPending')} ${review.counts.pending} / ${t('impactTitle')} ${review.counts.total}`}
+                      {t('countPendingOfTotal')
+                        .replace('{pending}', String(review.counts.pending))
+                        .replace('{total}', String(review.counts.total))}
                     </span>
                   ) : null}
                   {review.status === 'attacking' ? (
@@ -1001,7 +1005,7 @@ function defectFoldKey(reviewId: string, defectId: string): string {
                 const foldKey = defectFoldKey(review.reviewId, defect.id)
                 const isOpen = expandedDefects[foldKey] === true
                 return (
-                <div className={styles.defect} key={defect.id}>
+                <div className={`${styles.defect} ${styles[`defect_${defect.status}`] ?? ''}`} key={defect.id}>
                   <div className={styles.defectHead}>
                     <span className={styles.chip}>{defect.dimension}</span>
                     {defect.dimensionFallback === true ? <span className={styles.chipWarn}>{t('dimensionFallback')}</span> : null}
