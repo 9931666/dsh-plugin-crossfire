@@ -177,12 +177,6 @@ export async function spawnExpert(
   if (provider.prepareContinuable === undefined) {
     throw new Error(`crossfire: provider "${config.provider}" does not support continuable experts`)
   }
-  if (!provider.capabilities.persona) {
-    throw new Error(`crossfire: provider "${config.provider}" cannot apply an expert persona`)
-  }
-  if (!provider.capabilities.toolFilter) {
-    throw new Error(`crossfire: provider "${config.provider}" cannot restrict expert tools (the read-only guarantee needs this)`)
-  }
 
   const input: ExpertPersonaInput = {
     reviewId: record.reviewId,
@@ -222,23 +216,66 @@ export async function spawnExpert(
   // "查看原提示词"显示的东西与专家真正收到的东西不是同一份 —— 而那正是我们要修的缺陷。
   const persona = expertPersona(input)
 
-  const started = await ctx.subagents.startContinuable({
-    provider: config.provider,
-    label: `${EXPERT_LABEL_PREFIX}${record.reviewId}:${expert.key}`,
-    request: {
-      prompt: [{ type: 'text', text: expertWelcome(input) }] as ContentBlock[],
-      parent,
-      persona,
-      toolFilter: expertToolRestriction(),
-      ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
-      ...(config.maxDepth === undefined ? {} : { maxDepth: config.maxDepth }),
-    },
-    signal,
-  })
-  // 落盘时机**在 startContinuable 成功之后**：拉起失败时什么都不记（调用方会把
-  // status 记成 failed），避免留下一份"看起来下发过、其实没发出去"的原文。
+  const prompt: ContentBlock[] = [{ type: 'text', text: expertWelcome(input) }]
+  const request: Record<string, unknown> = {
+    prompt,
+    parent,
+    ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
+    ...(config.maxDepth === undefined ? {} : { maxDepth: config.maxDepth }),
+  }
+
+  // 0.2.1 收敛了子代理契约：`startContinuable` 与 per-child `persona`/`toolFilter`
+  // 一起被移除（persona 归 system-prompt / agent preset，工具面由 preset 拥有）。
+  // 按运行时形状二选一，不把探测变成加载门禁：两个入口都缺才报错。
+  //
+  // **只读边界的退化**：旧宿主用 `toolFilter`（白名单）硬保证专家不能写、不能执行、
+  // 不能联网；新宿主没有这个通道，边界退化为 persona 里的文字约束（见 redteam.ts
+  // 的「工具边界」段）。要恢复硬边界，需要宿主提供只读 preset 并通过 `agentPreset`
+  // 选择 —— 本文件已支持（见下方 agentPreset 透传），但 preset 必须在 profile 里
+  // 静态声明，不能由插件运行时注册。
+  const subagents = ctx.subagents as unknown as {
+    startActivation?: (spec: {
+      provider: string
+      label: string
+      request: Record<string, unknown>
+      signal: AbortSignal
+      delivery: 'parent' | 'caller'
+    }) => Promise<{ childId: unknown }>
+    startContinuable?: (spec: {
+      provider: string
+      label: string
+      request: Record<string, unknown>
+      signal: AbortSignal
+    }) => Promise<{ childId: unknown }>
+  }
+
+  const label = `${EXPERT_LABEL_PREFIX}${record.reviewId}:${expert.key}`
+  let childId: unknown
+  if (typeof subagents.startActivation === 'function') {
+    request.prompt = [...prompt, { type: 'text', text: persona }]
+    const started = await subagents.startActivation({
+      provider: config.provider,
+      label,
+      request,
+      signal,
+      delivery: 'parent',
+    })
+    childId = started.childId
+  } else if (typeof subagents.startContinuable === 'function') {
+    const started = await subagents.startContinuable({
+      provider: config.provider,
+      label,
+      request: { ...request, persona, toolFilter: expertToolRestriction() },
+      signal,
+    })
+    childId = started.childId
+  } else {
+    throw new Error('crossfire: the host exposes neither startActivation (0.2.1+) nor startContinuable (older) — cannot spawn an expert')
+  }
+  // 落盘时机**在拉起成功之后**：拉起失败时什么都不记（调用方会把 status 记成
+  // failed），避免留下一份"看起来下发过、其实没发出去"的原文。
   expert.persona = persona
-  return String(started.childId)
+  return String(childId)
 }
 
 /**

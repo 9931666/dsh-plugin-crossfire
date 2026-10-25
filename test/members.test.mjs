@@ -224,3 +224,53 @@ test('spawnExpert：拉起失败时不留 persona（不落任何状态）', asyn
   )
   assert.equal(target.persona, undefined, '没发出去的 persona 不许落盘（否则"原文"是伪造的）')
 })
+
+/* ------------------------------------------------------------------ *
+ * 0.2.1+：startActivation + persona 并入首条 prompt
+ * ------------------------------------------------------------------ */
+
+test('新宿主：走 startActivation，persona 并入首条 prompt，delivery=parent，落盘同一份', async () => {
+  const captured = {}
+  const provider = fakeProvider()
+  const ctx = {
+    logger: { warn() {} },
+    subagents: {
+      getProvider: () => provider,
+      list: () => ['spawn'],
+      startActivation: async (spec) => {
+        captured.spec = spec
+        return { childId: 'child-9' }
+      },
+    },
+  }
+  const target = expert()
+  const childId = await spawnExpert(
+    ctx,
+    CONFIG,
+    record(),
+    target,
+    {},
+    new AbortController().signal,
+    { maxOpinions: 3 },
+  )
+
+  assert.equal(childId, 'child-9')
+  assert.equal(captured.spec.delivery, 'parent', '结果要通知主持人（父代理）')
+  assert.equal('persona' in captured.spec.request, false, '新宿主不再接收 persona 字段')
+  assert.equal('toolFilter' in captured.spec.request, false, '新宿主不再接收 toolFilter 字段')
+
+  const blocks = captured.spec.request.prompt
+  assert.equal(blocks.length, 2, '首条 prompt = welcome + persona 两段')
+  assert.equal(blocks[1].type, 'text')
+  assert.ok(blocks[1].text.includes('红队专家'), 'persona 真的进了 prompt')
+  assert.equal(target.persona, blocks[1].text, '落盘的必须就是下发的那一份（A1 在新路径同样成立）')
+})
+
+test('两个入口都不存在时给出可诊断的错误', async () => {
+  const provider = fakeProvider()
+  const ctx = { logger: { warn() {} }, subagents: { getProvider: () => provider, list: () => ['spawn'] } }
+  await assert.rejects(
+    () => spawnExpert(ctx, CONFIG, record(), expert(), {}, new AbortController().signal, { maxOpinions: 3 }),
+    /neither startActivation .* nor startContinuable/,
+  )
+})
