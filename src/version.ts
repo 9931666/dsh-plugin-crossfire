@@ -10,7 +10,7 @@
  */
 
 /** 当前插件版本（必须与 package.json 的 version 逐字一致）。 */
-export const PLUGIN_VERSION = '0.1.4'
+export const PLUGIN_VERSION = '0.1.5'
 
 /** 导出物头部使用的插件标识行。 */
 export const PLUGIN_ID = `@y9931666/dsh-plugin-crossfire v${PLUGIN_VERSION}`
@@ -18,4 +18,4 @@ export const PLUGIN_ID = `@y9931666/dsh-plugin-crossfire v${PLUGIN_VERSION}`
 /** DeepSeek Harness 版本区间（导出头部展示用）。
  *  必须与 `compatibility.json` 的 `recommendedHost` 一致 —— 由
  *  `test/version.test.mjs` 强制。 */
-export const HARNESS_RANGE = 'DeepSeek Harness 0.2.1-rc.2+'
+export const HARNESS_RANGE = 'DeepSeek Harness 0.2.1-rc.5+'
