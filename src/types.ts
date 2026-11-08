@@ -9,6 +9,8 @@
  * @module dsh-plugin-crossfire/types
  */
 
+import type { ExpertRosterEntry } from './engine.ts'
+
 /* ------------------------------------------------------------------ *
  * 0. 维度池（攻击覆盖面）
  * ------------------------------------------------------------------ */
@@ -171,6 +173,17 @@ export interface RedTeamExpert {
    */
   role?: string
   /**
+   * 这位专家的**补充提示词**（来自启动前确认卡的自由文本，可空）。
+   *
+   * 与 {@link role} 是两条不同的来源、同一个落点：role 是"角色预设/阵容成员"里的
+   * 短定位，prompt 是用户在确认卡里对这位专家写的完整补充说明。两者都只进 persona
+   * 的补充段，都**不能**放宽硬约束（见 `redteam.ts` 的不可覆盖声明）。
+   *
+   * 缺席时 persona 与从前逐字一致；同样必须登记进 `review.ts` 的 `sanitizeExpert()`
+   * 白名单，否则会"写进 JSON 却读不回来"。
+   */
+  prompt?: string
+  /**
    * 这位专家**真正下发出去的那份 persona 的逐字副本**。
    *
    * ## 为什么必须落盘（红队抓出的"原提示词"缺陷）
@@ -257,6 +270,22 @@ export interface CrossfireRecord {
   dimensions: Dimension[]
   intensity: Intensity
   experts: RedTeamExpert[]
+  /**
+   * 启动前确认卡（`crossfire_plan_review` → `crossfire_open`）里逐行确认过的阵容。
+   *
+   * 它与 {@link experts} 是两个阶段的东西，刻意分开存：
+   * - `expertRoster` 是**用户确认过的配置**（每维一位、模型/角色/提示词都可能被
+   *   用户改过），主持人在 `crossfire_open` 时原样落盘；
+   * - `experts` 是**实际拉起的那一批**（带 childId / status / persona），由
+   *   `crossfire_attack` 生成。
+   *
+   * 分开的理由：`experts` 在复审轮开轮时会被清空（`crossfire_recheck` 置 `[]`），
+   * 而确认过的阵容必须活过整场评审 —— 否则复审轮会悄悄退回设置页的默认阵容，
+   * 用户确认过的东西就丢了。
+   *
+   * 缺席 = 没有走确认卡 / 没指定阵容，行为与从前逐字一致（按设置页阵容或纯继承）。
+   */
+  expertRoster?: ExpertRosterEntry[]
   defects: Defect[]
   /** 当前第几轮（首轮 = 1）。 */
   reviewPass: number

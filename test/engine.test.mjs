@@ -363,6 +363,38 @@ test('planExperts：空白 provider / model 一律视为缺席（不写空串）
 })
 
 /* ------------------------------------------------------------------ *
+ * 每维度粒度：确认卡落盘的 roster 带 dimension / prompt
+ * ------------------------------------------------------------------ */
+
+test('planExperts：roster 的 prompt 透传到专家（persona 的唯一来源）', () => {
+  const experts = planExperts(baseRecord(), 7, [{ key: '安全', prompt: ' 只盯密钥轮换 ' }])
+  assert.equal(experts.find((expert) => expert.key === '安全').prompt, '只盯密钥轮换', '必须去掉首尾空白')
+  assert.equal(experts.find((expert) => expert.key === '性能').prompt, undefined, '没配到的维度不写')
+})
+
+test('planExperts：空白 prompt 视为缺席（不写空串，persona 才不会多一段）', () => {
+  const experts = planExperts(baseRecord(), 7, [{ key: '安全', prompt: '   ' }])
+  assert.equal(experts.find((expert) => expert.key === '安全').prompt, undefined)
+})
+
+test('planExperts：roster 的 dimension 优先于 key 匹配（用户给专家换个名字也能对上）', () => {
+  // 确认卡是按"安全这一行"确认的，不是按"key 恰好叫安全"确认的：用户把专家
+  // 改名成 crypto-auditor 之后，配置必须仍然落在安全这一行上，而不是退到顺序兜底。
+  const experts = planExperts(baseRecord(), 7, [
+    { key: 'crypto-auditor', dimension: '性能', provider: 'perf-provider' },
+    { key: 'flow-checker', dimension: '安全', provider: 'sec-provider' },
+  ])
+  assert.equal(experts.find((expert) => expert.key === '安全').provider, 'sec-provider')
+  assert.equal(experts.find((expert) => expert.key === '性能').provider, 'perf-provider')
+})
+
+test('planExperts：没有 dimension 的老 roster 仍按 key / 顺序兜底（向后兼容）', () => {
+  const experts = planExperts(baseRecord(), 7, [{ key: 'auditor', role: '只盯边界' }])
+  // key 对不上维度名 → 顺序兜底：第 0 位对应「安全」。
+  assert.equal(experts[0].role, '只盯边界')
+})
+
+/* ------------------------------------------------------------------ *
  * A2：collect 的幂等
  * ------------------------------------------------------------------ */
 

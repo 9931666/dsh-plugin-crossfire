@@ -46,6 +46,9 @@ import type {
   Subject,
 } from './types.ts'
 import { DIMENSION_POOL, INTENSITY_SPECS } from './types.ts'
+// 只借类型：`engine.ts` 在运行时会 import 本模块（review.ts），所以这里必须是
+// `import type` —— 反过来运行时会成环。类型导入在编译后完全消失，不会成环。
+import type { ExpertRosterEntry } from './engine.ts'
 
 /** 当前 schema 版本。 */
 export const CURRENT_SCHEMA_VERSION = 1 as const
@@ -205,6 +208,12 @@ function sanitizeExpert(value: unknown): RedTeamExpert | undefined {
   if (model !== undefined) expert.model = model
   const role = asText(raw.role, 2000)
   if (role !== undefined) expert.role = role
+  // 用户补充提示词（启动前确认卡写的）。**同样必须登记在这里**：本函数是显式字段
+  // 白名单，漏登记会让 prompt 写进 JSON 却读不回来，于是"查看原提示词"的重建分支
+  // 少一段，而除往返断言外没有任何东西会报错。上限与 role 同为 2000（persona 里的
+  // 截断阈值一致）。
+  const prompt = asText(raw.prompt, 2000)
+  if (prompt !== undefined) expert.prompt = prompt
   // 真正下发那份 persona 的逐字副本（见 types.ts 的 `RedTeamExpert.persona`）。
   //
   // **这一行是必需的，别删**：本函数是一份**显式字段白名单**，未在此登记的字段会在
@@ -217,6 +226,45 @@ function sanitizeExpert(value: unknown): RedTeamExpert | undefined {
   const note = asText(raw.note, 500)
   if (note !== undefined) expert.note = note
   return expert
+}
+
+/**
+ * 净化确认卡落盘的阵容（`CrossfireRecord.expertRoster`）。
+ *
+ * `key` 是唯一必填项（与 `planExperts` 的匹配语义一致）；其余字段只保留非空值
+ * —— 空串与缺席在 persona/路由两处的语义完全相同（"没写"），落空串只会让记录
+ * 里多一个看起来有值的字段。
+ *
+ * 整体为空时返回 undefined（而不是 `[]`）：缺席与空数组在本插件里没有行为差异，
+ * 但不写这个字段能让"没走确认卡"的老记录保持与从前逐字相同的形状。
+ */
+function sanitizeRoster(value: unknown): ExpertRosterEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const entries: ExpertRosterEntry[] = []
+  for (const item of value) {
+    if (item === null || typeof item !== 'object') continue
+    const raw = item as Record<string, unknown>
+    const key = asText(raw.key, 64)
+    if (key === undefined) continue
+    const entry: ExpertRosterEntry = { key }
+    // dimension 优先于 key 参与匹配（见 engine.ts 的 planExperts），必须一起读回。
+    const dimension = asText(raw.dimension, 32)
+    if (dimension !== undefined) entry.dimension = dimension
+    const role = asText(raw.role, 2000)
+    if (role !== undefined) entry.role = role
+    const provider = asText(raw.provider, 64)
+    if (provider !== undefined) entry.provider = provider
+    const model = asText(raw.model, 128)
+    if (model !== undefined) entry.model = model
+    const prompt = asText(raw.prompt, 2000)
+    if (prompt !== undefined) entry.prompt = prompt
+    const name = asText(raw.name, 120)
+    if (name !== undefined) entry.name = name
+    entries.push(entry)
+    // 上限 64：一场评审的专家数由 maxExperts（默认 7）封顶，超大数组只可能是脏数据。
+    if (entries.length >= 64) break
+  }
+  return entries.length > 0 ? entries : undefined
 }
 
 function sanitizeStance(value: unknown, now: number): Stance {
@@ -365,6 +413,9 @@ export function normalizeRecord(raw: unknown, reviewId: string): CrossfireRecord
   }
   const sourceMeeting = asText(source.sourceMeeting, 128)
   if (sourceMeeting !== undefined) record.sourceMeeting = sourceMeeting
+  // 确认卡确认过的阵容：与 experts（实际拉起的那批）分开持久化，见 types.ts 的说明。
+  const expertRoster = sanitizeRoster(source.expertRoster)
+  if (expertRoster !== undefined) record.expertRoster = expertRoster
   const ownerSessionId = asText(source.ownerSessionId, 128)
   if (ownerSessionId !== undefined) record.ownerSessionId = ownerSessionId
   const settledAt = asCount(source.settledAt)

@@ -31,26 +31,27 @@ dsh plugin --profile web add @y9931666/dsh-plugin-crossfire
 
 安装后**重启 Harness 进程**并刷新浏览器（host 侧改动不热重载）。
 
-环境要求：DeepSeek Harness `0.2.0-rc.2+`、Node `>= 22`（开发时为 `24.x`）。
+环境要求：DeepSeek Harness `0.2.2-rc.1+`、Node `>= 22`（开发时为 `24.x`）。
 
 ## 用法
 
 在对话里说一句「用针锋评审一下这个方案」，或者在卡片上点按钮 —— 两条路驱动的是**同一套状态机**。
 
 ```
-draft ──送红队上场──▶ attacking ──收集观点──▶ judging ──定稿──▶ settled
-                                                ▲                │
-                                                └──── 开复审 ─────┘
-                                                   （只核对旧账）
+crossfire_plan_review ──▶ crossfire_open ──送红队上场──▶ attacking ──收集观点──▶ judging ──定稿──▶ settled
+   （设置确认卡，不落盘）        （draft）                                        ▲                │
+                                                                                └──── 开复审 ─────┘
+                                                                                   （只核对旧账）
 ```
 
 ### 工具面（`crossfire_*`）
 
 | 工具 | 作用 |
 | --- | --- |
-| `crossfire_open` | 把待验证对象摆上台（标题 + 正文 + 维度 + 强度）。状态 `draft` |
+| `crossfire_plan_review` | **开评第一步**：弹设置确认卡（表 1 评审设置 + 表 2 红队阵容），阻塞等用户「确定开始 / 仍需修改」；**不落盘、不拉专家**。确认后把返回的完整配置（含 `experts`）原样传给 `crossfire_open` |
+| `crossfire_open` | 把待验证对象摆上台（标题 + 正文 + 维度 + 强度 + 确认过的 `experts`）。状态 `draft` |
 | `crossfire_stance` | 写入用户的立场与理由；没有就**从对话提炼**（`distilled=true`），但绝不虚构 |
-| `crossfire_attack` | 按维度拉起只读红队专家。状态 `attacking` |
+| `crossfire_attack` | 按维度拉起只读红队专家（优先用确认卡落盘的 `expertRoster`）。状态 `attacking` |
 | `crossfire_collect` | 把专家发言拆成逐条可裁决的缺陷。状态 `judging` |
 | `crossfire_finish` | 定稿，固化 known-flaws 清单并写入历史。状态 `settled` |
 | `crossfire_recheck` | 复审：只核对上一轮已认定的缺陷是否修复 |
@@ -60,6 +61,8 @@ draft ──送红队上场──▶ attacking ──收集观点──▶ judgi
 ### 卡片
 
 在对话轨迹里占一张卡（`tool.call.toolview`，key = `crossfire_open`），每张缺陷一张子卡，可内联**认定 / 驳回（必填理由）/ 待定**，三态可互切。卡片每秒轮询快照，因此状态机一变它立刻跟着变。
+
+**启动前确认卡（v0.2.0）**：`crossfire_plan_review` 在轨迹里先占一张设置卡 —— 两张 Markdown 表（评审设置 / 红队阵容），按钮「确定开始」/「仍需修改」。改完再弹时顶部列「本次变更」；主持人没写就如实标「（本次未标注具体变更）」。确认卡**只确认怎么开评**，认定 / 驳回仍在评审卡上由人完成。
 
 顶部影响条显示 `认定 / 驳回 / 待定` 与"打穿立场"的条数。
 

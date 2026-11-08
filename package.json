@@ -1,6 +1,6 @@
 {
   "name": "@y9931666/dsh-plugin-crossfire",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

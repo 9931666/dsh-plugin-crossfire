@@ -203,6 +203,40 @@ test('spawnExpert 落盘的 persona 能穿过净化层读回（字段白名单�
   )
 })
 
+/* ------------------------------------------------------------------ *
+ * 补充提示词（确认卡写的 prompt）
+ * ------------------------------------------------------------------ */
+
+test('spawnExpert：expert.prompt 进入下发的 persona，并与落盘逐字相同', async () => {
+  const { captured, target } = await spawnCapturing({}, { prompt: '只盯密钥轮换与权限边界。' })
+  assert.ok(captured.options.request.persona.includes('评审者补充提示词'), 'persona 必须有补充提示词段')
+  assert.ok(captured.options.request.persona.includes('只盯密钥轮换与权限边界。'), '用户写的提示词必须进 persona')
+  assert.equal(target.persona, captured.options.request.persona, '下发 = 落盘（同一次调用的返回值）')
+})
+
+test('spawnExpert：expert.prompt 穿过净化层读回（字段白名单必须登记 prompt）', async () => {
+  // 与 persona 的往返断言同一类防线：`sanitizeExpert()` 是显式白名单，漏登记
+  // prompt 会让它"写进 JSON 却读不回来"，导致复审轮重新拉起专家时提示词凭空消失。
+  const { target, record: record_ } = await spawnCapturing({}, { prompt: '重点看轮换周期。' })
+  const root = await mkdtemp(join(tmpdir(), 'crossfire-members-prompt-'))
+  record_.experts = [target]
+  await writeRecord(root, record_)
+
+  const reloaded = await readRecord(root, 'x-members')
+  assert.equal(reloaded.experts[0].prompt, '重点看轮换周期。')
+})
+
+test('spawnExpert：没有 prompt 时 persona 不含补充提示词段（老记录不受影响）', async () => {
+  const { captured, target } = await spawnCapturing({}, {})
+  assert.equal(target.prompt, undefined)
+  assert.equal(captured.options.request.persona.includes('评审者补充提示词'), false)
+})
+
+test('spawnExpert：空串 / 纯空白 prompt 等同缺席（persona 不多一段）', async () => {
+  const { captured } = await spawnCapturing({}, { prompt: '   ' })
+  assert.equal(captured.options.request.persona.includes('评审者补充提示词'), false)
+})
+
 test('spawnExpert：拉起失败时不留 persona（不落任何状态）', async () => {
   const provider = fakeProvider({
     startContinuable: async () => {

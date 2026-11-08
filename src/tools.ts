@@ -5,7 +5,8 @@
  *
  * 圆桌是"主持人统筹"：模型负责建会、拉人、转述、聚合、推进每一轮。crossfire 不
  * 需要这些 —— 卡片上的按钮经 RPC 直接驱动 host 状态机（O1 决策）。所以这里的工具
- * 面刻意小：**六步、每步一件事、每步可单独重试**，模型只在"推不动了"的时候介入。
+ * 面刻意小：**预检一步 + 状态机七步、每步一件事、每步可单独重试**，模型只在
+ * "推不动了"的时候介入。
  *
  * 状态机（见 review.ts）：
  *   draft --open--> attacking --attack--> judging --collect--> settled --finish-->
@@ -24,12 +25,20 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { resolveDimensions } from './dimensions.ts'
-import { applyCollected, collectDefects } from './engine.ts'
+import { resolveDimension, resolveDimensions } from './dimensions.ts'
+import { applyCollected, collectDefects, planExperts, type ExpertRosterEntry } from './engine.ts'
 import { renderReviewMarkdown } from './export-md.ts'
 import { assertBudget, beginPass, chargeTokens, estimateTokens } from './budget.ts'
 import { locateExpertChildWithGrace, registerExpertChild } from './expert-events.ts'
 import { spawnExpert, type MemberRuntimeConfig } from './members.ts'
+import {
+  formatReviewDraft,
+  PLAN_APPROVE_LABEL,
+  PLAN_REVISE_LABEL,
+  resolvePlanConfirmation,
+  type DraftExpert,
+  type ReviewDraft,
+} from './plan.ts'
 import {
   appendTranscript,
   buildRecheckItems,
@@ -48,8 +57,7 @@ import {
 // 存在的理由本身，而 `test/redteam.test.mjs` 里有专门的断言守着它。
 import { newReviewId, reviewLockKey, stateRootOf, withCrossfireLock } from './state.ts'
 import type { ReviewSplitConfig, SplitLlmLike } from './split.ts'
-import type { CrossfireRecord, Defect, ExpertUtterance, Intensity, RedTeamExpert } from './types.ts'
-import { INTENSITY_SPECS } from './types.ts'
+import type { CrossfireRecord, Defect, ExpertUtterance, Intensity } from './types.ts'
 
 /** 设置页那一层（每次调用实时读取，因此改设置对新建评审立即生效）。 */
 export interface ReviewDefaults {
@@ -121,6 +129,149 @@ function parseIntensity(value: unknown): Intensity | undefined {
   return value === 'quick' || value === 'standard' || value === 'deep' ? value : undefined
 }
 
+/* ------------------------------------------------------------------ *
+ * 启动前确认卡的参数解析（crossfire_plan_review / crossfire_open 共用）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 把 `experts[]` 参数读成确认卡上的"草案行"。
+ *
+ * 维度经 `resolveDimension` 归一化到本次采用的维度：用户在卡上写「安全风险」也要
+ * 能对上「安全」，否则一行配置会因为这个后缀被静默丢掉。
+ *
+ * `key` 允许为空（缺席），表示"沿用默认的维度名"——用户通常只改模型或提示词。
+ */
+function parseDraftExpertRows(value: unknown, dimensions: readonly string[]): DraftExpert[] {
+  if (!Array.isArray(value)) return []
+  const rows: DraftExpert[] = []
+  for (const raw of value) {
+    if (raw === null || typeof raw !== 'object') continue
+    const entry = raw as Record<string, unknown>
+    const dimensionRaw = text(entry.dimension)
+    if (dimensionRaw === '') continue
+    const row: DraftExpert = {
+      key: text(entry.key),
+      dimension: resolveDimension(dimensionRaw, dimensions).dimension,
+    }
+    const role = text(entry.role)
+    if (role !== '') row.role = role
+    const provider = text(entry.provider)
+    if (provider !== '') row.provider = provider
+    const model = text(entry.model)
+    if (model !== '') row.model = model
+    const prompt = text(entry.prompt)
+    if (prompt !== '') row.prompt = prompt
+    rows.push(row)
+  }
+  return rows
+}
+
+/**
+ * 默认阵容：每维一位（等价于 `crossfire_attack` 不带 roster 时的结果），不落盘。
+ *
+ * 借 `newRecord` 造一份**不写盘**的临时记录：`planExperts` 只读 `dimensions` 与
+ * `intensity`，用真构造器而不是手工拼对象，是为了让卡片上的默认阵容与真正开打时
+ * 走**同一段**规划逻辑（复制一份必然分叉）。
+ */
+function defaultDraftExperts(
+  dimensions: string[],
+  intensity: Intensity,
+  maxRounds: number,
+  maxTokens: number,
+  maxExperts: number,
+): DraftExpert[] {
+  const preview = newRecord({
+    reviewId: 'plan-preview',
+    title: '',
+    content: '',
+    source: 'manual',
+    dimensions,
+    intensity,
+    maxRounds,
+    maxTokens,
+  })
+  return planExperts(preview, maxExperts).map((expert) => ({ key: expert.key, dimension: expert.dimension }))
+}
+
+/**
+ * 把用户提供的行合并进默认阵容（**只覆盖给了的列**）。
+ *
+ * 匹配顺序与 `planExperts` 一致：先按 key，再按维度。用户没提到的行保持默认值 ——
+ * 卡片上"未指定的列沿用设置页阵容/继承"这句话就是这条规则。
+ *
+ * 同一维度上用户显式加了第二位专家时**追加**（粒度由用户决定），最后按专家上限截断。
+ */
+function mergeDraftExperts(
+  defaults: readonly DraftExpert[],
+  provided: readonly DraftExpert[],
+  maxExperts: number,
+): DraftExpert[] {
+  const merged = defaults.map((expert) => ({ ...expert }))
+  const claimed = new Set<number>()
+  for (const row of provided) {
+    let target = row.key === ''
+      ? -1
+      : merged.findIndex((expert, index) => !claimed.has(index) && expert.key === row.key)
+    if (target < 0) {
+      target = merged.findIndex((expert, index) => !claimed.has(index) && expert.dimension === row.dimension)
+    }
+    if (target >= 0) {
+      claimed.add(target)
+      const current = merged[target]
+      if (current === undefined) continue
+      const next: DraftExpert = { ...current }
+      if (row.key !== '') next.key = row.key
+      if (row.role !== undefined) next.role = row.role
+      if (row.provider !== undefined) next.provider = row.provider
+      if (row.model !== undefined) next.model = row.model
+      if (row.prompt !== undefined) next.prompt = row.prompt
+      merged[target] = next
+    } else {
+      merged.push({ ...row, key: row.key === '' ? row.dimension : row.key })
+      claimed.add(merged.length - 1)
+    }
+  }
+  return merged.length > maxExperts ? merged.slice(0, maxExperts) : merged
+}
+
+/**
+ * 把 `experts[]` 参数读成**落盘的**阵容条目（只存非空字段）。
+ *
+ * 与确认卡的 `DraftExpert` 是同一份形状，但这里落的是 `ExpertRosterEntry`：
+ * "怎么配一位专家"。`dimension` 是比 `key` 更硬的匹配键（见 engine.ts 的
+ * `planExperts`），所以用户给专家换个名字也不会让这一行配置对不上。
+ */
+function rosterFromArguments(value: unknown): ExpertRosterEntry[] {
+  if (!Array.isArray(value)) return []
+  const entries: ExpertRosterEntry[] = []
+  for (const raw of value) {
+    if (raw === null || typeof raw !== 'object') continue
+    const entry = raw as Record<string, unknown>
+    const dimension = text(entry.dimension)
+    const key = text(entry.key) || dimension
+    if (key === '') continue
+    const roster: ExpertRosterEntry = { key }
+    if (dimension !== '') roster.dimension = dimension
+    const role = text(entry.role)
+    if (role !== '') roster.role = role
+    const provider = text(entry.provider)
+    if (provider !== '') roster.provider = provider
+    const model = text(entry.model)
+    if (model !== '') roster.model = model
+    const prompt = text(entry.prompt)
+    if (prompt !== '') roster.prompt = prompt
+    entries.push(roster)
+  }
+  return entries
+}
+
+/** `userQuestions` seam 返回的一条已回答问题（与圆桌 plan 卡同一协议）。 */
+interface AskUserQuestionAnswerItemLike {
+  id: string
+  selected: string[]
+  custom?: string
+}
+
 /** 读一场评审，不存在就抛错。 */
 async function requireRecord(stateRoot: string, reviewId: string): Promise<CrossfireRecord> {
   const record = await readRecord(stateRoot, reviewId)
@@ -173,11 +324,11 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
   }
 
   /* ================================================================ *
-   * 1. crossfire_open —— 开一场评审（draft）
+   * 0. crossfire_plan_review —— 启动前确认卡（不落盘）
    * ================================================================ */
   ctx.tools.register(defineTool({
-    name: 'crossfire_open',
-    description: 'Open a 针锋 (adversarial) review: put ONE settled result on the stand so red-team experts can attack it. Records the subject, your stance (optional but recommended — it gives the attack a target), the dimensions to attack from, and the intensity. Returns a review_id in status "draft"; the review card appears in the trajectory. Next step is crossfire_attack. Use this ONLY for something already decided — Crossfire never produces a plan and never fixes anything.',
+    name: 'crossfire_plan_review',
+    description: 'Show the human a REVIEW SETTINGS CARD before opening anything (step 0 of the flow). This tool does NOT create a review: it composes the draft (title, subject, source, intensity, dimensions, stance, one red-team expert per dimension with optional role/model/prompt, budget) into two markdown tables and BLOCKS until the user confirms. Returns decision="approved" plus the full confirmed config to pass to crossfire_open (including experts), or decision="revise" with the user\'s own words — update the draft, add changes[] and call this tool again (the card is shown again with the change list on top). Call it for EVERY review, even a single-expert one.',
     parameters: {
       title: { type: 'string', required: true, description: 'One-line title of the thing under review (shown on the card and in the export).' },
       content: { type: 'string', required: true, description: 'The settled result / plan / artifact itself: paste the actual text to be attacked.' },
@@ -187,6 +338,223 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
       source: { type: 'string', enum: ['manual', 'chat', 'file'], description: 'Where the subject came from (default manual).' },
       source_ref: { type: 'string', description: 'Optional reference for the source (a file path, or a short anchor).' },
       source_meeting: { type: 'string', description: 'Optional: the roundtable meeting id this review was handed over from.' },
+      experts: {
+        type: 'array',
+        description: 'Red-team roster shown on the card. Omit for the default: one expert per chosen dimension (key = dimension name, inheriting your route). Rows match by key, then by dimension; columns you leave out keep the default (inherit the host route, no extra role/prompt).',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            key: { type: 'string', description: 'Expert key inside the review (default: the dimension name).' },
+            dimension: { type: 'string', required: true, description: 'The one dimension this expert attacks.' },
+            role: { type: 'string', description: 'Short supplementary role, e.g. "密钥与权限". Narrows expertise only — it can never relax the read-only / no-plan / no-flattery rules.' },
+            provider: { type: 'string', description: 'Optional model provider route.' },
+            model: { type: 'string', description: 'Optional model id.' },
+            prompt: { type: 'string', description: 'Free-text supplementary prompt for this expert. Narrows expertise only — it can never relax the hard constraints.' },
+          },
+        },
+      },
+      changes: { type: 'array', items: { type: 'string' }, description: 'What changed since the previous draft (only meaningful when revised=true). Be specific, e.g. "reviewer model: zai/glm-5.2 → deepseek/deepseek-chat". An empty list while revised=true shows "（本次未标注具体变更）" — do not fake changes.' },
+      revised: { type: 'boolean', description: 'Set true when re-showing the card after the user asked for changes (the card then lists changes[] on top).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          decision: { type: 'string', required: true },
+          user_note: { type: 'string', required: true },
+          title: { type: 'string', required: true },
+          content: { type: 'string', required: true },
+          dimensions: { type: 'array', items: { type: 'string' }, required: true },
+          intensity: { type: 'string', required: true },
+          stance: { type: 'string', required: true },
+          source: { type: 'string', required: true },
+          source_ref: { type: 'string', required: true },
+          source_meeting: { type: 'string', required: true },
+          // 专家的每一列都声明为 required + 空串约定：主持人要把这份名单原样转给
+          // `crossfire_open`，缺席的列写成空串比"字段不存在"更好处理（与其它工具一致）。
+          experts: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                key: { type: 'string', required: true },
+                dimension: { type: 'string', required: true },
+                role: { type: 'string', required: true },
+                provider: { type: 'string', required: true },
+                model: { type: 'string', required: true },
+                prompt: { type: 'string', required: true },
+              },
+            },
+          },
+          max_rounds: { type: 'integer', required: true },
+          max_tokens: { type: 'integer', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.decision === 'approved'
+          ? `用户已确认评审设置：${value.title}（${value.intensity}，维度 ${value.dimensions.join(', ')}，`
+            + `${value.experts.length} 位红队专家，${value.max_rounds} 轮 / ${value.max_tokens} tokens）。`
+            + '请用 crossfire_open 按这些值开启评审（experts 原样传入），然后 crossfire_attack。'
+          : value.decision === 'revise'
+            ? `用户要求修改：${value.user_note}\n请据此更新草案（保持未改动的项原样），带上 changes[] 再次调用 crossfire_plan_review 让用户确认；确认前不要 crossfire_open。`
+            : `设置卡片未能取得用户答复（userQuestions 服务不可用或被中止）${value.user_note === '' ? '' : `：${value.user_note}`}。请把配置用文字告知用户，取得明确同意后再调用 crossfire_open。`,
+      }],
+    },
+    async execute(args, exec) {
+      const caller = requireAgent(exec)
+      const defaults = config.getDefaults()
+
+      const content = text(args.content)
+      if (content === '') throw new Error('content must not be empty — paste the thing under review')
+      const title = text(args.title) || content.slice(0, 40)
+      const intensity = parseIntensity(args.intensity) ?? defaults.intensity
+      const dimensions = resolveDimensions(stringArray(args.dimensions), defaults.customDimensions)
+      const source = args.source === 'chat' || args.source === 'file' ? args.source : 'manual'
+      const sourceRef = text(args.source_ref)
+      const sourceMeeting = text(args.source_meeting)
+      const stance = text(args.stance).slice(0, 2000)
+      const revised = args.revised === true
+      const changes = (args.changes ?? []).map((item) => item.trim()).filter((item) => item !== '')
+
+      // 默认阵容 = 开打时的那份（每维一位），用户给的行覆盖它。这里**不落盘**：
+      // 确认工具一旦顺手建记录，用户每改一次草案就会在磁盘上留一条空记录。
+      const experts = mergeDraftExperts(
+        defaultDraftExperts(dimensions, intensity, defaults.maxRounds, defaults.maxTokens, config.maxExperts),
+        parseDraftExpertRows(args.experts, dimensions),
+        config.maxExperts,
+      )
+
+      const draft: ReviewDraft = {
+        title,
+        content,
+        source,
+        ...(sourceRef === '' ? {} : { sourceRef }),
+        dimensions,
+        intensity,
+        stance,
+        experts,
+        maxRounds: defaults.maxRounds,
+        maxTokens: defaults.maxTokens,
+        changes,
+        revised,
+      }
+      const detail = formatReviewDraft(draft)
+
+      // 卡面输出的专家列一律写成字符串（缺席 = 空串），主持人把它原样转给
+      // `crossfire_open` 即可 —— 空串在 open 侧被当作"没写"。
+      const outExperts = draft.experts.map((expert) => ({
+        key: expert.key,
+        dimension: expert.dimension,
+        role: expert.role ?? '',
+        provider: expert.provider ?? '',
+        model: expert.model ?? '',
+        prompt: expert.prompt ?? '',
+      }))
+      const configured = {
+        title,
+        content,
+        dimensions,
+        intensity,
+        stance,
+        source,
+        source_ref: sourceRef,
+        source_meeting: sourceMeeting,
+        experts: outExperts,
+        max_rounds: defaults.maxRounds,
+        max_tokens: defaults.maxTokens,
+      }
+      const answerWith = (decision: string, note: string) => ({ decision, user_note: note, ...configured })
+
+      // `userQuestions` 是**可选**服务（不列进 inject）：缺席时返回 unavailable，
+      // 由主持人改用文字取得同意 —— 确认卡不能成为整个插件的加载门禁。
+      const userQuestions = ctx.get('userQuestions') as
+        | {
+            ask(request: {
+              questions: {
+                id: string
+                question: string
+                detail?: string
+                header?: string
+                options?: { label: string; description?: string }[]
+                intent?: { kind: 'plan-review'; approve: string }
+              }[]
+              agent?: Agent
+              signal?: AbortSignal
+            }): Promise<{ answers: AskUserQuestionAnswerItemLike[] }>
+          }
+        | undefined
+      if (userQuestions === undefined) {
+        return answerWith('unavailable', 'the userQuestions service is not mounted in this composition')
+      }
+
+      const questionId = randomUUID()
+      let answer: { answers: AskUserQuestionAnswerItemLike[] }
+      try {
+        answer = await userQuestions.ask({
+          questions: [{
+            id: questionId,
+            question: `确认「${title}」的评审设置？`,
+            detail,
+            header: '针锋 Crossfire · 评审设置确认',
+            options: [
+              { label: PLAN_APPROVE_LABEL, description: '按上方两张表开始评审（红队随后由主持人拉起）' },
+              { label: PLAN_REVISE_LABEL, description: '在输入框写明要改的地方，主持人会更新草案并再弹一次' },
+            ],
+            // 原生 plan-review 载体：detail 放卡片 Markdown，approve 指向批准选项。
+            intent: { kind: 'plan-review', approve: PLAN_APPROVE_LABEL },
+          }],
+          agent: caller,
+          signal: exec.signal,
+        })
+      } catch (error: unknown) {
+        // 卡片不可用（服务抛错/被中止）不是失败：它只是要求主持人改用文字确认。
+        return answerWith('unavailable', `设置卡片不可用：${(error as Error).message}`)
+      }
+      // 服务返回形状不可信（第三方 UI 可能不给 answers）。拿不到合法数组时按
+      // "用户没答"处理，而不是在这里抛错把整张卡变成一次失败。
+      const answers = Array.isArray(answer.answers) ? answer.answers : []
+      const item = answers.find((candidate) => candidate.id === questionId)
+      const confirmation = resolvePlanConfirmation(item)
+      return answerWith(confirmation.kind, confirmation.kind === 'approved' ? '' : confirmation.note)
+    },
+  }))
+
+  /* ================================================================ *
+   * 1. crossfire_open —— 开一场评审（draft）
+   * ================================================================ */
+  ctx.tools.register(defineTool({
+    name: 'crossfire_open',
+    description: 'Open a 针锋 (adversarial) review: put ONE settled result on the stand so red-team experts can attack it. Records the subject, your stance (optional but recommended — it gives the attack a target), the dimensions to attack from, the intensity, and (when the user confirmed a settings card) the red-team roster. Returns a review_id in status "draft"; the review card appears in the trajectory. Preferred flow (v0.2.0): call crossfire_plan_review first and let the user confirm, then call this tool with exactly the confirmed values — including experts, which are stored on the record and consumed by crossfire_attack. Next step is crossfire_attack. Use this ONLY for something already decided — Crossfire never produces a plan and never fixes anything.',
+    parameters: {
+      title: { type: 'string', required: true, description: 'One-line title of the thing under review (shown on the card and in the export).' },
+      content: { type: 'string', required: true, description: 'The settled result / plan / artifact itself: paste the actual text to be attacked.' },
+      dimensions: { type: 'array', items: { type: 'string' }, description: 'Dimensions to attack from, e.g. ["安全","性能"]. Omit to use the full pool (安全/数据/交互/性能/兼容/流程/反例 + your custom ones). Unknown values are normalized to the nearest pool value.' },
+      intensity: { type: 'string', enum: ['quick', 'standard', 'deep'], description: 'Attack intensity: quick (one round), standard (default), deep (adds a cross-examination round, allows two re-reviews).' },
+      stance: { type: 'string', description: 'YOUR position and reasons on this subject, in your own words. When present, the red team must argue against each reason and mark whether it was refuted (strikes_stance). This is what turns a neutral review into 针锋相对.' },
+      source: { type: 'string', enum: ['manual', 'chat', 'file'], description: 'Where the subject came from (default manual).' },
+      source_ref: { type: 'string', description: 'Optional reference for the source (a file path, or a short anchor).' },
+      source_meeting: { type: 'string', description: 'Optional: the roundtable meeting id this review was handed over from.' },
+      experts: {
+        type: 'array',
+        description: 'The confirmed red-team roster from crossfire_plan_review (pass it verbatim). Stored on the record and consumed by crossfire_attack, so each expert keeps its dimension, model, role and prompt. Omit to keep the defaults (one expert per dimension, inheriting your route) — behavior is then byte-identical to before.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            key: { type: 'string', description: 'Expert key (default: the dimension name).' },
+            dimension: { type: 'string', required: true, description: 'The one dimension this expert attacks.' },
+            role: { type: 'string', description: 'Short supplementary role (narrows expertise only).' },
+            provider: { type: 'string', description: 'Optional model provider route.' },
+            model: { type: 'string', description: 'Optional model id.' },
+            prompt: { type: 'string', description: 'Free-text supplementary prompt (narrows expertise only — never relaxes the hard constraints).' },
+          },
+        },
+      },
     },
     output: {
       schema: {
@@ -237,6 +605,11 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
         ...(sourceMeeting === '' ? {} : { sourceMeeting }),
         ownerSessionId: caller.id,
       })
+      // 确认卡确认过的阵容（主持人按 `crossfire_plan_review` 的输出原样传入）。
+      // 只写非空字段；空数组不写 —— 让"没走确认卡"的老记录保持与从前逐字相同的形状，
+      // 此时 crossfire_attack 的 roster 为空，行为与从前完全一致。
+      const expertRoster = rosterFromArguments(args.experts)
+      if (expertRoster.length > 0) record.expertRoster = expertRoster
       await withCrossfireLock(reviewLockKey(stateRoot, reviewId), async () => {
         await writeRecord(stateRoot, record)
       })
@@ -317,22 +690,14 @@ export function registerCrossfireTools(ctx: Context, config: ToolsConfig): void 
           )
         }
 
-        const spec = INTENSITY_SPECS[record.intensity]
-        const experts: RedTeamExpert[] = []
-        for (const dimension of record.dimensions) {
-          const count = Math.max(1, spec.expertsPerDimension)
-          for (let index = 0; index < count; index += 1) {
-            experts.push({
-              key: count === 1 ? dimension : `${dimension}-${index + 1}`,
-              dimension,
-              status: 'pending',
-              defectCount: 0,
-            })
-          }
-        }
-        // 规模上限：超出时按维度顺序截断，并保留前 N 位（顺序来自 record.dimensions，
-        // 所以用户排在前面的维度优先 —— 可预期，而不是随机丢人）。
-        const trimmed = experts.length > config.maxExperts ? experts.slice(0, config.maxExperts) : experts
+        // 阵容来源优先级：用户在启动前确认卡里逐行确认过的 `expertRoster` 优先 ——
+        // 那是用户看过并点过「确定开始」的那一份，模型/角色/提示词都可能被他改过。
+        // 没有确认卡时 roster 为空，`planExperts` 的结果与从前的内联循环逐字一致
+        // （每维一位、继承主持人路由、无补充定位）。
+        //
+        // 顺带把这段规划收进 engine：工具端与 RPC 端此前各写一份，而 RPC 那份早就
+        // 会消费设置页阵容 —— 同一条规则两处实现，分叉只是时间问题。
+        const trimmed = planExperts(record, config.maxExperts, record.expertRoster ?? [])
 
         // 复审轮：本轮的攻击目标是"核对旧账"，阵容照旧但缺陷集合是核对项。
         const isRecheck = record.reviewPass > 1 && record.history.length > 0

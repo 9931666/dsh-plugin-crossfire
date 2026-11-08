@@ -27,6 +27,7 @@ const registered = [...source.matchAll(/name:\s*'(crossfire_[a-z_]+)'/g)].map((m
 const hostTools = registered.filter((name) => name !== 'crossfire_report')
 
 const EXPECTED = [
+  'crossfire_plan_review',
   'crossfire_open',
   'crossfire_attack',
   'crossfire_collect',
@@ -37,7 +38,7 @@ const EXPECTED = [
   'crossfire_report',
 ]
 
-test('工具面恰好是 7 个主持人工具 + 1 个专家工具', () => {
+test('工具面恰好是 8 个主持人工具 + 1 个专家工具', () => {
   assert.deepEqual([...registered].sort(), [...EXPECTED].sort())
 })
 
@@ -54,7 +55,7 @@ test('专家白名单恰好 5 个只读工具，不含任何写/执行/联网工
   }
 })
 
-test('黑名单恰好覆盖 7 个主持人工具，且不含专家工具', () => {
+test('黑名单恰好覆盖 8 个主持人工具，且不含专家工具', () => {
   assert.deepEqual([...EXPERT_TOOL_DENY].sort(), [...hostTools].sort())
   assert.equal(EXPERT_TOOL_DENY.includes('crossfire_report'), false, 'crossfire_report 是专家的唯一发声通道，绝不能被禁')
 })
@@ -111,4 +112,41 @@ test('报告信封给出可切分的固定标记（本地兜底切分依赖它�
 test('welcome 让专家知道要提交什么', () => {
   const welcome = `${expertPersona(personaInput())}${reportEnvelopeSpec(3)}`
   assert.ok(welcome.includes('观点 N') || welcome.includes('观点'))
+})
+
+/* ------------------------------------------------------------------ *
+ * 补充提示词（启动前确认卡的自由文本）
+ *
+ * 边界与「你的角色定位」段**完全相同**：用户能把"安全维度的红队"收窄成"只盯密钥
+ * 轮换的那位"，但不能用它把只读/不产出方案/不迎合改写掉。空值必须逐字不变。
+ * ------------------------------------------------------------------ */
+
+test('persona：有补充提示词时追加独立一段，并写明不可覆盖', () => {
+  const persona = expertPersona({ ...personaInput(), prompt: '只盯密钥轮换与权限边界，别管其它。' })
+  assert.ok(persona.includes('## 评审者补充提示词（只放宽专长，不放宽约束）'), '必须有自己的段标题')
+  assert.ok(persona.includes('只盯密钥轮换与权限边界，别管其它。'), '用户写的提示词必须逐字进入 persona')
+  assert.match(persona, /不能\*\*放宽|不能放宽/, '必须声明它可以被硬约束覆盖')
+  assert.match(persona, /以硬约束为准/, '冲突时的裁决规则必须写死')
+  assert.match(persona, /始终是只读的/, '只读边界不能被提示词放宽')
+  assert.match(persona, /不产出方案/, '不产出方案的边界不能被提示词放宽')
+  assert.match(persona, /不迎合/, '不迎合的边界不能被提示词放宽')
+})
+
+test('persona：保留原有的角色定位段（role 与 prompt 是两段、互不吞并）', () => {
+  const persona = expertPersona({
+    ...personaInput(),
+    role: '熟悉密钥管理',
+    prompt: '重点看轮换周期',
+  })
+  assert.ok(persona.includes('## 你的角色定位（评审者补充，只放宽专长，不放宽约束）'))
+  assert.ok(persona.includes('## 评审者补充提示词（只放宽专长，不放宽约束）'))
+  assert.ok(persona.indexOf('熟悉密钥管理') < persona.indexOf('重点看轮换周期'), 'role 段在 prompt 段之前')
+})
+
+test('persona：prompt 为空 / 纯空白 / 缺席时逐字不变', () => {
+  const base = expertPersona(personaInput())
+  assert.equal(expertPersona({ ...personaInput(), prompt: '' }), base)
+  assert.equal(expertPersona({ ...personaInput(), prompt: '   \n  ' }), base)
+  assert.equal(expertPersona({ ...personaInput(), prompt: undefined }), base)
+  assert.equal(base.includes('评审者补充提示词'), false, '没写提示词时不得留下一个空段标题')
 })

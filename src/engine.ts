@@ -43,10 +43,26 @@ export interface ExpertRosterEntry {
    * 匹配不到时退回**顺序**兜底（见 {@link planExperts}），两种写法都能用。
    */
   key: string
+  /**
+   * 这位专家负责的维度（可选；**有它时优先于 `key` 匹配**）。
+   *
+   * 为什么需要它：启动前确认卡是按维度逐行列出的，用户在卡上改的是"安全这一行"，
+   * 而不是"key 恰好叫安全的那位专家"。只在 `key` 上做匹配意味着用户给专家换个
+   * 名字（`crypto-auditor`）之后，这行配置就悄悄对不上了 —— 于是退到顺序兜底，
+   * 看起来还能跑，实际配错了人。显式带维度就没有这层歧义。
+   */
+  dimension?: string
   /** 用户补充的角色定位（进 persona 的「你的角色定位」段）。 */
   role?: string
   provider?: string
   model?: string
+  /**
+   * 用户补充的提示词（进 persona 的「评审者补充提示词」段）。
+   *
+   * 与 {@link role} 同一条边界：只收窄专长，不放宽只读/不产出方案/不迎合；
+   * 缺席时 persona 与从前逐字一致。
+   */
+  prompt?: string
   /**
    * 预设名（只有角色预设带它）。
    *
@@ -64,11 +80,13 @@ export interface ExpertRosterEntry {
  * `record.dimensions` 的顺序截断，所以**用户排在前面的维度优先** —— 这是可预期的，
  * 而不是随机丢人。
  *
- * 人选来源两条，按优先级：
- * 1. `roster` 里 `key` 等于维度名的那一条（精确指定，最符合直觉）；
- * 2. 否则按**顺序**取 roster 的第 i 条（i = 维度序号）—— 用户不必把 key 改名成
+ * 人选来源三条，按优先级：
+ * 1. `roster` 里 `dimension` 等于该维度的那一条（确认卡落盘的阵容就是这种形状：
+ *    用户确认的是"安全这一行"，而不是某个恰好叫安全的 key）；
+ * 2. 否则 `key` 等于维度名的那一条（精确指定，最符合直觉）；
+ * 3. 否则按**顺序**取 roster 的第 i 条（i = 维度序号）—— 用户不必把 key 改名成
  *    维度名也能用上一份现成的阵容；
- * 3. 都取不到时只写维度与状态（专家继承主持人路由、无补充定位），与从前完全一致。
+ * 4. 都取不到时只写维度与状态（专家继承主持人路由、无补充定位），与从前完全一致。
  *
  * @param roster - 可选人选来源；缺席或为空时行为与从前逐字一致。
  */
@@ -82,9 +100,11 @@ export function planExperts(
   let dimensionIndex = 0
   for (const dimension of record.dimensions) {
     const count = Math.max(1, spec.expertsPerDimension)
-    // 精确命中优先；否则顺序兜底。注意顺序兜底用的是**维度序号**而不是专家序号，
-    // 这样"每维 2 位"时两位专家共享同一份定位，而不是被拆成两个人设。
-    const matched = roster.find((entry) => entry.key === dimension) ?? roster[dimensionIndex]
+    // 精确命中优先（维度 → key）；否则顺序兜底。注意顺序兜底用的是**维度序号**
+    // 而不是专家序号，这样"每维 2 位"时两位专家共享同一份定位，而不是被拆成两个人设。
+    const matched = roster.find((entry) => entry.dimension !== undefined && entry.dimension === dimension)
+      ?? roster.find((entry) => entry.key === dimension)
+      ?? roster[dimensionIndex]
     dimensionIndex += 1
     for (let index = 0; index < count; index += 1) {
       const expert: RedTeamExpert = {
@@ -109,6 +129,8 @@ export function planExperts(
         // 下游以为拿到了一条路由。
         if (matched.provider !== undefined && matched.provider.trim() !== '') expert.provider = matched.provider.trim()
         if (matched.model !== undefined && matched.model.trim() !== '') expert.model = matched.model.trim()
+        // 补充提示词与 role 同样处理：空串/纯空白视为"没写"，缺席时 persona 逐字不变。
+        if (matched.prompt !== undefined && matched.prompt.trim() !== '') expert.prompt = matched.prompt.trim()
       }
       experts.push(expert)
     }

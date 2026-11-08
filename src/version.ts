@@ -10,7 +10,7 @@
  */
 
 /** 当前插件版本（必须与 package.json 的 version 逐字一致）。 */
-export const PLUGIN_VERSION = '0.1.6'
+export const PLUGIN_VERSION = '0.2.0'
 
 /** 导出物头部使用的插件标识行。 */
 export const PLUGIN_ID = `@y9931666/dsh-plugin-crossfire v${PLUGIN_VERSION}`

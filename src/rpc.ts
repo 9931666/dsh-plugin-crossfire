@@ -523,6 +523,10 @@ export function registerRpc(ctx: Context, runtime: CrossfireRuntime): RpcDispatc
             dimensions: located.record.dimensions,
             maxOpinions: runtime.tools.getDefaults().expertMaxOpinions,
             ...(expert.role === undefined ? {} : { role: expert.role }),
+            // 重建也必须与真实下发同源：确认卡写下的补充提示词同样进 persona 的
+            // 「评审者补充提示词」段，漏传会让重建出来的文本少一段（旧记录缺 persona
+            // 字段时才走这条分支，但"看起来像原文"的假文本正是这里要防的）。
+            ...(expert.prompt === undefined ? {} : { prompt: expert.prompt }),
           })
           return ok({ expertKey, dimension: expert.dimension, persona, rebuilt: true })
         }
@@ -718,12 +722,15 @@ async function advance(
           + 'wait for them to report, or collect what they have already submitted',
         )
       }
-      // 阵容来源：用户偏好里的**第一套阵容**（没有阵容时退回角色预设，按顺序平铺）。
-      // 这一步修的是红队抓出的"预设只写不读"：此前 `rolePresets`/`squads` 在主流程
-      // 零消费点，`ExpertPersonaInput` 没有 role 字段，`expert.provider`/`expert.model`
-      // 也永远缺席 —— 设置页因此是个存了不用的仓库。
+      // 阵容来源，按优先级二选一：
+      // 1. **确认卡落盘的 `expertRoster`**（用户在 `crossfire_plan_review` 里逐行确认过
+      //    的那一份：每维一位，模型/角色/提示词都可能被用户改过）。这是用户看过并点过
+      //    「确定开始」的配置，比设置页的默认值更权威。
+      // 2. 没有确认卡时退回用户偏好里的**第一套阵容**（没有阵容时退回角色预设，按顺序
+      //    平铺）。这一步修的是红队抓出的"预设只写不读"：此前 `rolePresets`/`squads` 在
+      //    主流程零消费点，`expert.provider`/`expert.model` 也永远缺席。
       const prefs = runtime.prefs.get()
-      const roster = rosterFrom({
+      const preferencesRoster = rosterFrom({
         squads: prefs.squads.map((squad) => ({
           id: squad.id,
           members: squad.members.map((member) => ({
@@ -740,6 +747,9 @@ async function advance(
           ...(preset.model === undefined ? {} : { model: preset.model }),
         })),
       })
+      const roster = current.expertRoster !== undefined && current.expertRoster.length > 0
+        ? current.expertRoster
+        : preferencesRoster
       const experts = planExperts(current, runtime.tools.maxExperts, roster)
       const isRecheck = current.reviewPass > 1 && current.history.length > 0
       if (isRecheck && current.defects.length === 0) current.defects = buildRecheckItems(current)

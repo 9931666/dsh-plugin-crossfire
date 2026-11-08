@@ -187,7 +187,7 @@ export function apply(ctx: Context, config: Config): void {
     // ready() 内部已把读失败降级为默认值，这里无事可做。
   })
 
-  // 工具面：6 个主持人工具 + 1 个专家工具（crossfire_report）。
+  // 工具面：8 个主持人工具（含启动前确认卡）+ 1 个专家工具（crossfire_report）。
   registerCrossfireTools(ctx, runtime.tools)
   // 专家产出自动落盘（即使它没调 crossfire_report 或被中断），失败原因写进专家备注。
   attachExpertEvents(ctx)

@@ -189,6 +189,9 @@ export async function spawnExpert(
     // 用户的补充角色定位（来自阵容/角色预设）。它进 persona 的「你的角色定位」段，
     // 那一段带着不可覆盖的声明 —— 这条文本不能用来放宽只读边界。
     ...(expert.role === undefined ? {} : { role: expert.role }),
+    // 用户确认卡里写的补充提示词（来自 `record.expertRoster` 经 planExperts 透传）。
+    // 进 persona 的「评审者补充提示词」段，边界与 role 相同：只收窄专长。
+    ...(expert.prompt === undefined ? {} : { prompt: expert.prompt }),
   }
 
   // Per-request output cap: model max_tokens applied to every request this
