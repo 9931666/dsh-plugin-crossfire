@@ -71,7 +71,10 @@
     "test": "node --test --test-isolation=none \"test/*.test.mjs\"",
     "test:inline": "node --test --test-isolation=none \"test/*.test.mjs\"",
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsdown -c tsdown.config.ts && tsc -p tsconfig.json --emitDeclarationOnly && tsc -p tsconfig.client.json --emitDeclarationOnly",
-    "bundle:client": "tsdown -c tsdown.config.ts"
+    "bundle:client": "tsdown -c tsdown.config.ts",
+    "compatibility": "node scripts/compatibility.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
+    "publish:guard": "node scripts/compatibility.mjs && node scripts/verify-package.mjs --strict"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",
